@@ -1,0 +1,17 @@
+version: '3'
+
+tasks:
+  build:
+    silent: true
+    cmds:
+      - go test -run '^$' ./api
+
+  test:
+    silent: true
+    cmds:
+      - go test ./api
+
+  check:
+    silent: true
+    cmds:
+      - "command -v go >/dev/null 2>&1 && echo '[api] Go ok' || { echo '[api] Go failed'; exit 1; }"
