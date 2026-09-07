@@ -1,0 +1,40 @@
+version: '3'
+
+includes:
+  apiserver: ./apiserver/Taskfile.yml
+  scheduler: ./scheduler/Taskfile.yml
+  kubelet: ./kubelet/Taskfile.yml
+  cri: ./cri/Taskfile.yml
+  cni: ./cni/Taskfile.yml
+  kube-proxy: ./kube-proxy/Taskfile.yml
+
+tasks:
+  build:
+    desc: Build every component
+    cmds:
+      - task: apiserver:build
+      - task: scheduler:build
+      - task: kubelet:build
+      - task: cri:build
+      - task: cni:build
+      - task: kube-proxy:build
+
+  test:
+    desc: Run every component test
+    cmds:
+      - task: apiserver:test
+      - task: scheduler:test
+      - task: kubelet:test
+      - task: cri:test
+      - task: cni:test
+      - task: kube-proxy:test
+
+  check:
+    desc: Check every component environment
+    cmds:
+      - task: apiserver:check
+      - task: scheduler:check
+      - task: kubelet:check
+      - task: cri:check
+      - task: cni:check
+      - task: kube-proxy:check

@@ -1,0 +1,22 @@
+version: '3'
+
+tasks:
+  build:
+    silent: true
+    cmds:
+      - echo '[scheduler] build ok (no source yet)'
+
+  test:
+    silent: true
+    cmds:
+      - echo '[scheduler] test ok (no tests yet)'
+
+  check:
+    silent: true
+    cmds:
+      - task: check:tools
+
+  check:tools:
+    silent: true
+    cmds:
+      - "command -v go >/dev/null 2>&1 && echo '[scheduler] Go ok' || { echo '[scheduler] Go failed'; exit 1; }"

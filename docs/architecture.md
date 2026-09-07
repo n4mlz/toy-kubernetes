@@ -70,9 +70,9 @@ nodeName が空の Pod と Ready な Node を観測し、Pod を worker に bind
 
 Kubelet は worker namespace に常駐する node agent であり、runtime や CNI の内部処理を直接担当しない。
 
-### runtime と CNI
+### CRI runtime と CNI
 
-runtime は kubelet からの簡易 runtime protocol を受け、nginx bundle の container lifecycle を実行する。runtime は C で実装し、rootfs、process、namespace の作成と終了処理を担当する。
+CRI runtime は kubelet からの簡易 CRI protocol を受け、nginx bundle の container lifecycle を実行する。CRI runtime は C で実装し、rootfs、process、namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri とする。
 
 CNI は Pod network namespace と worker の bridge を veth pair で接続し、Pod IP と route を設定する。CNI は network resource を作る imperative な effector である。
 
@@ -171,7 +171,7 @@ Service は専用の仮想 process を作らず、kube-proxy が worker namespac
 
 1. control plane と指定された数の worker 用 network namespace を作る
 2. underlay network、worker bridge、worker 間 route を作る
-3. 各 node の設定、static Pod manifest directory、runtime socket、ログ directory を用意する
+3. 各 node の設定、static Pod manifest directory、CRI socket、ログ directory を用意する
 4. 各 node namespace の init process として、小さい systemd 相当の node supervisor を起動する
 
 node supervisor は、node namespace 内で常駐 process の起動、終了監視、終了時の cleanup を担当する。これは systemd の全機能を再現するものではなく、unit の依存関係、restart、signal forwarding に必要な最小機能だけを持つ。
@@ -180,17 +180,17 @@ node supervisor は、node namespace 内で常駐 process の起動、終了監�
 
 実際の kubeadm 構成に寄せ、control plane の bootstrap は次の順序にする。
 
-1. node supervisor が runtime と kubelet を起動する
+1. node supervisor が CRI runtime と kubelet を起動する
 2. control plane の kubelet が local static Pod manifest を読み込む
-3. kubelet が runtime に etcd、kube-apiserver、kube-scheduler、kube-controller-manager の static Pod を起動させる
+3. kubelet が CRI runtime に etcd、kube-apiserver、kube-scheduler、kube-controller-manager の static Pod を起動させる
 4. API server の readiness を待つ
-5. worker の kubelet と runtime を起動し、Node object を登録する
+5. worker の kubelet と CRI runtime を起動し、Node object を登録する
 6. API server 起動後に kube-proxy を worker 上の通常 workload として起動する
-7. kubelet が API state と runtime state を reconcile する
+7. kubelet が API state と CRI runtime state を reconcile する
 
 実 Kubernetes でも、kubelet と container runtime は host service manager から起動し、kubeadm の control plane component は kubelet が static Pod として起動する。この toy implementation では、その host service manager と static Pod の境界を、仮想 node と node supervisor で見える形にする。
 
-停止時は、Pod、CNI resource、worker の通常 workload、static Pod、kubelet/runtime、node supervisor、network namespace、underlay、control plane process、etcd の順に、所有している resource を cleanup する。起動 script は Ctrl-C と異常終了の両方で cleanup を実行する。
+停止時は、Pod、CNI resource、worker の通常 workload、static Pod、kubelet/CRI runtime、node supervisor、network namespace、underlay、control plane process、etcd の順に、所有している resource を cleanup する。起動 script は Ctrl-C と異常終了の両方で cleanup を実行する。
 
 ## 意図的に単純化するもの
 
