@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -42,12 +43,22 @@ func TestEtcdCRUDKeepsObjectsAndVersions(t *testing.T) {
 		t.Fatalf("get should return the stored object and version: %#v, %d", pod, version)
 	}
 
-	var pods []object
-	if _, err := etcd.List(ctx, "Pod", &pods); err != nil {
+	entries, _, err := etcd.List(ctx, "Pod")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pods) != 2 || pods[0].Name != "one" || pods[1].Name != "two" {
-		t.Fatalf("list should contain both Pods in name order: %#v", pods)
+	if len(entries) != 2 {
+		t.Fatalf("list should contain both Pods: %#v", entries)
+	}
+	var first, second object
+	if err := json.Unmarshal(entries[0].Object, &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(entries[1].Object, &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.Name != "one" || second.Name != "two" || entries[0].ResourceVersion == 0 || entries[1].ResourceVersion == 0 {
+		t.Fatalf("list should contain objects and their revisions: %#v", entries)
 	}
 
 	secondVersion, err := etcd.Update(ctx, "Pod", "one", object{Name: "one", Value: "updated"}, version)
@@ -76,11 +87,11 @@ func TestEtcdWatchPublishesChangesAndRejectsStaleUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	firstWatcher, err := etcd.Watch(ctx, "Pod")
+	firstWatcher, err := etcd.Watch(ctx, "Pod", version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondWatcher, err := etcd.Watch(ctx, "Pod")
+	secondWatcher, err := etcd.Watch(ctx, "Pod", version)
 	if err != nil {
 		t.Fatal(err)
 	}

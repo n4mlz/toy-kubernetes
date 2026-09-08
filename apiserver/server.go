@@ -1,0 +1,336 @@
+package apiserver
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"toy-kubernetes/api"
+	"toy-kubernetes/etcd"
+)
+
+// Server は API server 側で HTTP API を提供する
+// client.go の Client からは通常、別の component やプロセスから HTTP で接続されることになる
+type Server struct {
+	etcd etcd.Etcd
+}
+
+type resourceList struct {
+	ResourceVersion int64          `json:"resourceVersion"`
+	Items           []api.Resource `json:"items"`
+}
+
+func NewServer(etcdClient etcd.Etcd) *Server {
+	return &Server{etcd: etcdClient}
+}
+
+func (server *Server) Handler() http.Handler {
+	return http.HandlerFunc(server.serveHTTP)
+}
+
+// URL をリソース操作または watch 操作に振り分ける
+func (server *Server) serveHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+	path := strings.Trim(request.URL.Path, "/")
+	pathParts := strings.Split(path, "/")
+
+	if len(pathParts) == 2 && pathParts[0] == "watch" {
+		server.watch(responseWriter, request, pathParts[1])
+		return
+	}
+
+	if len(pathParts) < 1 || len(pathParts) > 2 {
+		writeError(responseWriter, http.StatusNotFound, "resource path not found")
+		return
+	}
+
+	resource := pathParts[0]
+	kind, err := kindForResource(resource)
+	if err != nil {
+		writeError(responseWriter, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if len(pathParts) == 1 {
+		server.collection(responseWriter, request, resource, kind)
+		return
+	}
+
+	server.object(responseWriter, request, resource, kind, pathParts[1])
+}
+
+// リソースの一覧取得と新規作成を処理する
+func (server *Server) collection(responseWriter http.ResponseWriter, request *http.Request, resource, kind string) {
+	switch request.Method {
+	case http.MethodGet:
+		entries, version, err := server.etcd.List(request.Context(), kind)
+		if err != nil {
+			writeStoreError(responseWriter, err)
+			return
+		}
+
+		objects, err := decodeList(kind, entries)
+		if err != nil {
+			writeError(responseWriter, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(responseWriter, http.StatusOK, resourceList{ResourceVersion: version, Items: objects})
+	case http.MethodPost:
+		object, name, err := decodeResource(resource, request.Body)
+
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		version, err := server.etcd.Create(request.Context(), kind, name, object)
+		if err != nil {
+			writeStoreError(responseWriter, err)
+			return
+		}
+
+		object.SetResourceVersion(version)
+		writeJSON(responseWriter, http.StatusCreated, object)
+	default:
+		writeError(responseWriter, http.StatusMethodNotAllowed, "method is not allowed for a resource collection")
+	}
+}
+
+// 名前を指定したリソースの取得・更新・削除を処理する
+func (server *Server) object(responseWriter http.ResponseWriter, request *http.Request, resource, kind, name string) {
+	switch request.Method {
+	case http.MethodGet:
+		object := newResource(kind)
+
+		version, err := server.etcd.Get(request.Context(), kind, name, object)
+		if err != nil {
+			writeStoreError(responseWriter, err)
+			return
+		}
+
+		object.SetResourceVersion(version)
+		writeJSON(responseWriter, http.StatusOK, object)
+	case http.MethodPut:
+		object, bodyName, err := decodeResource(resource, request.Body)
+
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if bodyName != name {
+			writeError(responseWriter, http.StatusBadRequest, "metadata.name must match the URL")
+			return
+		}
+
+		resourceVersion := object.GetResourceVersion()
+		if resourceVersion == 0 {
+			writeError(responseWriter, http.StatusBadRequest, "metadata.resourceVersion is required for update")
+			return
+		}
+
+		version, err := server.etcd.Update(request.Context(), kind, name, object, resourceVersion)
+		if err != nil {
+			writeStoreError(responseWriter, err)
+			return
+		}
+
+		object.SetResourceVersion(version)
+		writeJSON(responseWriter, http.StatusOK, object)
+	case http.MethodDelete:
+		resourceVersion, err := queryResourceVersion(request)
+
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if err := server.etcd.Delete(request.Context(), kind, name, resourceVersion); err != nil {
+			writeStoreError(responseWriter, err)
+			return
+		}
+
+		responseWriter.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(responseWriter, http.StatusMethodNotAllowed, "method is not allowed for a resource")
+	}
+}
+
+// etcd の変更を HTTP のストリームとしてクライアントへ渡す
+func (server *Server) watch(responseWriter http.ResponseWriter, request *http.Request, resource string) {
+	if request.Method != http.MethodGet {
+		writeError(responseWriter, http.StatusMethodNotAllowed, "watch only supports GET")
+		return
+	}
+	kind, err := kindForResource(resource)
+	if err != nil {
+		writeError(responseWriter, http.StatusNotFound, err.Error())
+		return
+	}
+
+	resourceVersion, err := queryResourceVersion(request)
+	if err != nil {
+		writeError(responseWriter, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	events, err := server.etcd.Watch(request.Context(), kind, resourceVersion)
+	if err != nil {
+		writeStoreError(responseWriter, err)
+		return
+	}
+
+	responseWriter.Header().Set("Content-Type", "application/x-ndjson")
+	responseWriter.WriteHeader(http.StatusOK)
+	flusher, canFlush := responseWriter.(http.Flusher)
+	if canFlush {
+		flusher.Flush()
+	}
+	encoder := json.NewEncoder(responseWriter)
+	for event := range events {
+		if event.Err != nil {
+			return
+		}
+
+		object := newResource(kind)
+		if err := json.Unmarshal(event.Object, object); err != nil {
+			return
+		}
+		object.SetResourceVersion(event.ResourceVersion)
+
+		watchEvent := struct {
+			Type   etcd.EventType `json:"type"`
+			Object api.Resource   `json:"object"`
+		}{event.Type, object}
+		if err := encoder.Encode(watchEvent); err != nil {
+			return
+		}
+
+		if canFlush {
+			flusher.Flush()
+		}
+	}
+}
+
+// URL に対応する型へ JSON を読み込み、基本的な入力を検証する
+func decodeResource(resource string, body io.Reader) (api.Resource, string, error) {
+	object := newResource(kindForResourceName(resource))
+
+	if err := json.NewDecoder(body).Decode(object); err != nil {
+		return nil, "", fmt.Errorf("decode %s: %w", resource, err)
+	}
+
+	name := object.GetName()
+	if name == "" {
+		return nil, "", errors.New("metadata.name is required")
+	}
+
+	if err := validateResource(kindForResourceName(resource), object); err != nil {
+		return nil, "", err
+	}
+	return object, name, nil
+}
+
+func kindForResource(resource string) (string, error) {
+	kind := kindForResourceName(resource)
+	if kind == "" {
+		return "", fmt.Errorf("unknown resource %q", resource)
+	}
+	return kind, nil
+}
+
+func kindForResourceName(resource string) string {
+	switch resource {
+	case "nodes":
+		return "Node"
+	case "pods":
+		return "Pod"
+	case "deployments":
+		return "Deployment"
+	case "replicasets":
+		return "ReplicaSet"
+	case "services":
+		return "Service"
+	default:
+		return ""
+	}
+}
+
+func newResource(kind string) api.Resource {
+	switch kind {
+	case "Node":
+		return &api.Node{}
+	case "Pod":
+		return &api.Pod{}
+	case "Deployment":
+		return &api.Deployment{}
+	case "ReplicaSet":
+		return &api.ReplicaSet{}
+	case "Service":
+		return &api.Service{}
+	default:
+		return nil
+	}
+}
+
+func decodeList(kind string, entries []etcd.Entry) ([]api.Resource, error) {
+	objects := make([]api.Resource, len(entries))
+
+	for i, entry := range entries {
+		object := newResource(kind)
+		if err := json.Unmarshal(entry.Object, object); err != nil {
+			return nil, fmt.Errorf("decode stored %s: %w", kind, err)
+		}
+		object.SetResourceVersion(entry.ResourceVersion)
+		objects[i] = object
+	}
+
+	return objects, nil
+}
+
+func validateResource(kind string, object api.Resource) error {
+	if kind == "Pod" && len(object.(*api.Pod).Spec.Containers) == 0 {
+		return errors.New("spec.containers is required for Pod")
+	}
+	return nil
+}
+
+func queryResourceVersion(request *http.Request) (int64, error) {
+	value := request.URL.Query().Get("resourceVersion")
+	if value == "" {
+		return 0, nil
+	}
+	version, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || version < 1 {
+		return 0, errors.New("resourceVersion must be a positive integer")
+	}
+	return version, nil
+}
+
+func writeStoreError(responseWriter http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, etcd.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, etcd.ErrAlreadyExists), errors.Is(err, etcd.ErrConflict):
+		status = http.StatusConflict
+	case errors.Is(err, context.Canceled):
+		return
+	}
+	writeError(responseWriter, status, err.Error())
+}
+
+func writeJSON(responseWriter http.ResponseWriter, status int, value any) {
+	responseWriter.Header().Set("Content-Type", "application/json")
+	responseWriter.WriteHeader(status)
+	_ = json.NewEncoder(responseWriter).Encode(value)
+}
+
+func writeError(responseWriter http.ResponseWriter, status int, message string) {
+	writeJSON(responseWriter, status, map[string]string{"error": message})
+}

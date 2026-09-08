@@ -4,12 +4,12 @@ tasks:
   build:
     silent: true
     cmds:
-      - echo '[apiserver] build ok (no source yet)'
+      - go test -run '^$' ./apiserver
 
   test:
     silent: true
     cmds:
-      - echo '[apiserver] test ok (no tests yet)'
+      - go test ./apiserver
 
   check:
     silent: true

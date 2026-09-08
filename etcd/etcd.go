@@ -33,15 +33,19 @@ type Event struct {
 	Err             error
 }
 
-// Etcd は API server が etcd に要求する interface
-// resource version は etcd の更新番号 (API の競合検出に使用される)
+type Entry struct {
+	ResourceVersion int64
+	Object          json.RawMessage
+}
+
+// API server から etcd を使うための interface
 type Etcd interface {
 	Get(ctx context.Context, kind, name string, result any) (int64, error)
-	List(ctx context.Context, kind string, result any) (int64, error)
+	List(ctx context.Context, kind string) ([]Entry, int64, error)
 	Create(ctx context.Context, kind, name string, object any) (int64, error)
 	Update(ctx context.Context, kind, name string, object any, resourceVersion int64) (int64, error)
 	Delete(ctx context.Context, kind, name string, resourceVersion int64) error
-	Watch(ctx context.Context, kind string) (<-chan Event, error)
+	Watch(ctx context.Context, kind string, resourceVersion int64) (<-chan Event, error)
 }
 
 type EtcdClient struct {
@@ -54,8 +58,7 @@ func NewEtcdClient(client *clientv3.Client) *EtcdClient {
 	return &EtcdClient{client: client}
 }
 
-// ここからは interface の実装
-
+// 名前でリソースを取得し、保存時の ResourceVersion を返す
 func (c *EtcdClient) Get(ctx context.Context, kind, name string, result any) (int64, error) {
 	response, err := c.client.Get(ctx, objectKey(kind, name))
 
@@ -74,30 +77,23 @@ func (c *EtcdClient) Get(ctx context.Context, kind, name string, result any) (in
 	return response.Kvs[0].ModRevision, nil
 }
 
-func (c *EtcdClient) List(ctx context.Context, kind string, result any) (int64, error) {
+// 種類が一致するリソースをすべて取得し、それらのバージョンを返す
+func (c *EtcdClient) List(ctx context.Context, kind string) ([]Entry, int64, error) {
 	response, err := c.client.Get(ctx, objectPrefix(kind), clientv3.WithPrefix())
 
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 
-	values := make([]json.RawMessage, len(response.Kvs))
+	entries := make([]Entry, len(response.Kvs))
 	for i, pair := range response.Kvs {
-		values[i] = pair.Value
+		entries[i] = Entry{ResourceVersion: pair.ModRevision, Object: pair.Value}
 	}
 
-	data, err := json.Marshal(values)
-	if err != nil {
-		return 0, fmt.Errorf("encode list: %w", err)
-	}
-
-	if err := json.Unmarshal(data, result); err != nil {
-		return 0, fmt.Errorf("decode object list: %w", err)
-	}
-
-	return response.Header.Revision, nil
+	return entries, response.Header.Revision, nil
 }
 
+// リソースを新規保存し、etcd が割り当てたバージョンを返す
 func (c *EtcdClient) Create(ctx context.Context, kind, name string, object any) (int64, error) {
 	value, err := json.Marshal(object)
 	if err != nil {
@@ -120,6 +116,7 @@ func (c *EtcdClient) Create(ctx context.Context, kind, name string, object any) 
 	return response.Header.Revision, nil
 }
 
+// 現在のバージョンが一致する場合だけリソースを更新する
 func (c *EtcdClient) Update(ctx context.Context, kind, name string, object any, resourceVersion int64) (int64, error) {
 	value, err := json.Marshal(object)
 	if err != nil {
@@ -142,6 +139,7 @@ func (c *EtcdClient) Update(ctx context.Context, kind, name string, object any, 
 	return response.Header.Revision, nil
 }
 
+// 現在のバージョンが一致する場合だけリソースを削除する
 func (c *EtcdClient) Delete(ctx context.Context, kind, name string, resourceVersion int64) error {
 	compare := clientv3.Compare(clientv3.Version(objectKey(kind, name)), ">", 0)
 	if resourceVersion != 0 {
@@ -161,8 +159,14 @@ func (c *EtcdClient) Delete(ctx context.Context, kind, name string, resourceVers
 	return nil
 }
 
-func (c *EtcdClient) Watch(ctx context.Context, kind string) (<-chan Event, error) {
-	watch := c.client.Watch(ctx, objectPrefix(kind), clientv3.WithPrefix(), clientv3.WithPrevKV())
+// 指定した種類のリソース変更をイベントの channel として返す
+func (c *EtcdClient) Watch(ctx context.Context, kind string, resourceVersion int64) (<-chan Event, error) {
+	options := []clientv3.OpOption{clientv3.WithPrefix(), clientv3.WithPrevKV()}
+	if resourceVersion > 0 {
+		options = append(options, clientv3.WithRev(resourceVersion+1))
+	}
+
+	watch := c.client.Watch(ctx, objectPrefix(kind), options...)
 	events := make(chan Event, 16)
 
 	go func() {

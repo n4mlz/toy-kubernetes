@@ -15,6 +15,13 @@ type ObjectMeta struct {
 	OwnerReferences []OwnerReference  `json:"ownerReferences,omitempty" yaml:"ownerReferences,omitempty"`
 }
 
+// API server がすべてのリソースに共通して扱う情報
+type Resource interface {
+	GetName() string
+	GetResourceVersion() int64
+	SetResourceVersion(int64)
+}
+
 type OwnerReference struct {
 	Kind string `json:"kind" yaml:"kind"`
 	Name string `json:"name" yaml:"name"`
@@ -26,6 +33,18 @@ type Node struct {
 	ObjectMeta `json:"metadata" yaml:"metadata"`
 	Spec       NodeSpec   `json:"spec" yaml:"spec"`
 	Status     NodeStatus `json:"status,omitempty" yaml:"status,omitempty"`
+}
+
+func (object *Node) GetName() string {
+	return object.Name
+}
+
+func (object *Node) GetResourceVersion() int64 {
+	return object.ResourceVersion
+}
+
+func (object *Node) SetResourceVersion(version int64) {
+	object.ResourceVersion = version
 }
 
 type NodeSpec struct {
@@ -48,6 +67,18 @@ type Pod struct {
 	ObjectMeta `json:"metadata" yaml:"metadata"`
 	Spec       PodSpec   `json:"spec" yaml:"spec"`
 	Status     PodStatus `json:"status,omitempty" yaml:"status,omitempty"`
+}
+
+func (object *Pod) GetName() string {
+	return object.Name
+}
+
+func (object *Pod) GetResourceVersion() int64 {
+	return object.ResourceVersion
+}
+
+func (object *Pod) SetResourceVersion(version int64) {
+	object.ResourceVersion = version
 }
 
 type PodSpec struct {
@@ -88,6 +119,18 @@ type Deployment struct {
 	Status     DeploymentStatus `json:"status,omitempty" yaml:"status,omitempty"`
 }
 
+func (object *Deployment) GetName() string {
+	return object.Name
+}
+
+func (object *Deployment) GetResourceVersion() int64 {
+	return object.ResourceVersion
+}
+
+func (object *Deployment) SetResourceVersion(version int64) {
+	object.ResourceVersion = version
+}
+
 type DeploymentSpec struct {
 	Replicas int               `json:"replicas" yaml:"replicas"`
 	Selector map[string]string `json:"selector" yaml:"selector"`
@@ -103,6 +146,18 @@ type ReplicaSet struct {
 	ObjectMeta `json:"metadata" yaml:"metadata"`
 	Spec       ReplicaSetSpec   `json:"spec" yaml:"spec"`
 	Status     ReplicaSetStatus `json:"status,omitempty" yaml:"status,omitempty"`
+}
+
+func (object *ReplicaSet) GetName() string {
+	return object.Name
+}
+
+func (object *ReplicaSet) GetResourceVersion() int64 {
+	return object.ResourceVersion
+}
+
+func (object *ReplicaSet) SetResourceVersion(version int64) {
+	object.ResourceVersion = version
 }
 
 type ReplicaSetSpec struct {
@@ -124,6 +179,18 @@ type Service struct {
 	TypeMeta   `json:",inline" yaml:",inline"`
 	ObjectMeta `json:"metadata" yaml:"metadata"`
 	Spec       ServiceSpec `json:"spec" yaml:"spec"`
+}
+
+func (object *Service) GetName() string {
+	return object.Name
+}
+
+func (object *Service) GetResourceVersion() int64 {
+	return object.ResourceVersion
+}
+
+func (object *Service) SetResourceVersion(version int64) {
+	object.ResourceVersion = version
 }
 
 type ServiceSpec struct {
