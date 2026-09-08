@@ -1,0 +1,18 @@
+version: '3'
+
+tasks:
+  build:
+    silent: true
+    cmds:
+      - go test -run '^$' ./etcd
+
+  test:
+    silent: true
+    cmds:
+      - go test ./etcd
+
+  check:
+    silent: true
+    cmds:
+      - "command -v go >/dev/null 2>&1 && echo '[etcd] Go ok' || { echo '[etcd] Go failed'; exit 1; }"
+      - "command -v etcd >/dev/null 2>&1 && echo '[etcd] etcd ok' || { echo '[etcd] etcd failed'; exit 1; }"

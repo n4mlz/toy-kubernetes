@@ -2,6 +2,7 @@ version: '3'
 
 includes:
   api: ./api/Taskfile.yml
+  etcd: ./etcd/Taskfile.yml
   apiserver: ./apiserver/Taskfile.yml
   scheduler: ./scheduler/Taskfile.yml
   kubelet: ./kubelet/Taskfile.yml
@@ -14,6 +15,7 @@ tasks:
     desc: Build every component
     cmds:
       - task: api:build
+      - task: etcd:build
       - task: apiserver:build
       - task: scheduler:build
       - task: kubelet:build
@@ -25,6 +27,7 @@ tasks:
     desc: Run every component test
     cmds:
       - task: api:test
+      - task: etcd:test
       - task: apiserver:test
       - task: scheduler:test
       - task: kubelet:test
@@ -36,6 +39,7 @@ tasks:
     desc: Check every component environment
     cmds:
       - task: api:check
+      - task: etcd:check
       - task: apiserver:check
       - task: scheduler:check
       - task: kubelet:check

@@ -55,8 +55,8 @@ kube-apiserver は resource の作成・取得・更新・削除の入口であ�
 
 複数の Reconciler を一つのプロセスで動かす。
 
-- Deployment Reconciler: Deployment から ReplicaSet を作成・更新する
-- ReplicaSet Reconciler: desired replicas と管理対象 Pod 数の差分を埋める
+- DeploymentController: Deployment から ReplicaSet を作成・更新する
+- ReplicaSetController: desired replicas と管理対象 Pod 数の差分を埋める
 
 Reconciler の基本形は、observe current state → desired state との差分計算 → action の選択 → API state の更新または effector の呼び出し、である。
 
