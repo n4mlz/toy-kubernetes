@@ -1,0 +1,17 @@
+version: '3'
+
+tasks:
+  build:
+    silent: true
+    cmds:
+      - go test -run '^$' ./controller-manager
+
+  test:
+    silent: true
+    cmds:
+      - go test ./controller-manager
+
+  check:
+    silent: true
+    cmds:
+      - "command -v go >/dev/null 2>&1 && echo '[controller-manager] Go ok' || { echo '[controller-manager] Go failed'; exit 1; }"
