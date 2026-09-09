@@ -1,0 +1,34 @@
+version: '3'
+
+tasks:
+  build:
+    silent: true
+    cmds:
+      - go build -o /tmp/node-supervisor ./cmd/node-supervisor
+
+  test:
+    silent: true
+    cmds:
+      - go test ./node
+
+  run:
+    silent: true
+    cmds:
+      - sh ./node/scripts/run.sh {{.CLI_ARGS}}
+
+  check:
+    silent: true
+    cmds:
+      - task: check:tools
+      - task: check:netns
+
+  check:tools:
+    silent: true
+    cmds:
+      - "command -v go >/dev/null 2>&1 && echo '[node] Go ok' || { echo '[node] Go failed'; exit 1; }"
+      - "command -v ip >/dev/null 2>&1 && echo '[node] ip ok' || { echo '[node] ip failed'; exit 1; }"
+
+  check:netns:
+    silent: true
+    cmds:
+      - "test \"$(id -u)\" = 0 && echo '[node] root ok' || { echo '[node] root failed'; exit 1; }"
