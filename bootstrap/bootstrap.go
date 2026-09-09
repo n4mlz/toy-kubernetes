@@ -15,7 +15,8 @@ type Config struct {
 	NodePrefix  int
 }
 
-// TODO: node supervisor と kubelet の起動後に、kubelet の自己登録へ置き換える
+// TODO: 現在は API server から Node object を直接登録している。
+// node supervisor と kubelet の起動後に、kubelet の自己登録へ置き換える。
 func RegisterWorkers(ctx context.Context, client *apiserver.Client, config Config) error {
 	if config.WorkerCount < 0 {
 		return fmt.Errorf("worker count must not be negative")

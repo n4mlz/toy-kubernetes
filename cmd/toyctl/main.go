@@ -56,7 +56,8 @@ func run(args []string) error {
 	case "delete":
 		return deleteResource(context.Background(), client, commandArgs[1:])
 	case "bootstrap":
-		// TODO: run script の内部処理へ移し、公開 CLI から削除する
+		// TODO: 現在は toyctl の公開コマンドとして bootstrap を提供している。
+		// 仮想 node の起動処理から呼び出す内部処理へ移し、公開 CLI から削除する。
 		return bootstrapWorkers(context.Background(), client, commandArgs[1:])
 	default:
 		return fmt.Errorf("unknown command %q", commandArgs[0])

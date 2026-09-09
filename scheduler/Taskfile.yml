@@ -4,12 +4,12 @@ tasks:
   build:
     silent: true
     cmds:
-      - echo '[scheduler] build ok (no source yet)'
+      - go test -run '^$' ./scheduler
 
   test:
     silent: true
     cmds:
-      - echo '[scheduler] test ok (no tests yet)'
+      - go test ./scheduler
 
   check:
     silent: true
