@@ -9,6 +9,7 @@ includes:
   cri: ./cri/Taskfile.yml
   cni: ./cni/Taskfile.yml
   kube-proxy: ./kube-proxy/Taskfile.yml
+  toyctl: ./cmd/toyctl/Taskfile.yml
 
 tasks:
   build:
@@ -22,6 +23,7 @@ tasks:
       - task: cri:build
       - task: cni:build
       - task: kube-proxy:build
+      - task: toyctl:build
 
   test:
     desc: Run every component test
@@ -34,6 +36,7 @@ tasks:
       - task: cri:test
       - task: cni:test
       - task: kube-proxy:test
+      - task: toyctl:test
 
   check:
     desc: Check every component environment
@@ -46,3 +49,4 @@ tasks:
       - task: cri:check
       - task: cni:check
       - task: kube-proxy:check
+      - task: toyctl:check

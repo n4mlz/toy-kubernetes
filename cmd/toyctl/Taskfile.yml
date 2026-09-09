@@ -1,0 +1,17 @@
+version: '3'
+
+tasks:
+  build:
+    silent: true
+    cmds:
+      - go build -o /tmp/toyctl ./cmd/toyctl
+
+  test:
+    silent: true
+    cmds:
+      - go test ./cmd/toyctl ./bootstrap
+
+  check:
+    silent: true
+    cmds:
+      - "command -v go >/dev/null 2>&1 && echo '[toyctl] Go ok' || { echo '[toyctl] Go failed'; exit 1; }"
