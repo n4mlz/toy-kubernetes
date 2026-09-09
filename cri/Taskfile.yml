@@ -1,43 +1,28 @@
 version: '3'
 
-tasks:
-  prepare-bundle:
-    silent: true
-    cmds:
-      - sh ./cri/prepare-nginx-bundle.sh
+includes:
+  runtime: ./runtime/Taskfile.yml
 
+tasks:
   build:
     silent: true
     cmds:
-      - cc -std=c17 -Wall -Wextra -Werror -o /tmp/toy-cri ./cri/runtime.c
       - go test -run '^$' ./cri
+      - task: runtime:build
 
   test:
     silent: true
     cmds:
       - go test ./cri
+      - task: runtime:test
 
   check:
     silent: true
     cmds:
-      - task: check:tools
-      - task: check:user-namespace
-      - task: check:pid-mount-namespace
+      - "command -v go >/dev/null 2>&1 && echo '[cri] Go ok' || { echo '[cri] Go failed'; exit 1; }"
+      - task: runtime:check
 
-  check:tools:
+  prepare-bundle:
     silent: true
     cmds:
-      - "command -v cc >/dev/null 2>&1 && echo '[cri] C compiler ok' || { echo '[cri] C compiler failed'; exit 1; }"
-      - "command -v docker >/dev/null 2>&1 && echo '[cri] Docker ok' || { echo '[cri] Docker failed'; exit 1; }"
-      - "command -v unshare >/dev/null 2>&1 && echo '[cri] unshare ok' || { echo '[cri] unshare failed'; exit 1; }"
-      - "command -v mount >/dev/null 2>&1 && echo '[cri] mount ok' || { echo '[cri] mount failed'; exit 1; }"
-
-  check:user-namespace:
-    silent: true
-    cmds:
-      - "unshare --user --map-root-user --fork true >/dev/null 2>&1 && echo '[cri] user namespace ok' || { echo '[cri] user namespace failed'; exit 1; }"
-
-  check:pid-mount-namespace:
-    silent: true
-    cmds:
-      - "unshare --user --map-root-user --pid --mount --fork true >/dev/null 2>&1 && echo '[cri] PID/mount namespace ok' || { echo '[cri] PID/mount namespace failed'; exit 1; }"
+      - task: runtime:prepare-bundle

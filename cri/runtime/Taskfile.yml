@@ -1,0 +1,39 @@
+version: '3'
+
+tasks:
+  prepare-bundle:
+    silent: true
+    cmds:
+      - sh ./cri/runtime/scripts/prepare-bundle.sh
+
+  build:
+    silent: true
+    cmds:
+      - go build -o /tmp/runtime ./cmd/runtime
+      - go test -run '^$' ./cri/runtime
+
+  test:
+    silent: true
+    cmds:
+      - go test ./cri/runtime
+
+  check:
+    silent: true
+    cmds:
+      - task: check:tools
+      - task: check:pid-mount-namespace
+
+  check:tools:
+    silent: true
+    cmds:
+      - "command -v go >/dev/null 2>&1 && echo '[runtime] Go ok' || { echo '[runtime] Go failed'; exit 1; }"
+      - "test \"$(id -u)\" = 0 && echo '[runtime] root ok' || { echo '[runtime] root failed'; exit 1; }"
+      - "command -v docker >/dev/null 2>&1 && echo '[runtime] Docker ok' || { echo '[runtime] Docker failed'; exit 1; }"
+      - "command -v jq >/dev/null 2>&1 && echo '[runtime] jq ok' || { echo '[runtime] jq failed'; exit 1; }"
+      - "command -v unshare >/dev/null 2>&1 && echo '[runtime] unshare ok' || { echo '[runtime] unshare failed'; exit 1; }"
+      - "command -v mount >/dev/null 2>&1 && echo '[runtime] mount ok' || { echo '[runtime] mount failed'; exit 1; }"
+
+  check:pid-mount-namespace:
+    silent: true
+    cmds:
+      - "unshare --pid --mount --fork true >/dev/null 2>&1 && echo '[runtime] PID/mount namespace ok' || { echo '[runtime] PID/mount namespace failed'; exit 1; }"

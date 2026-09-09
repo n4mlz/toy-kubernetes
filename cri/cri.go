@@ -1,9 +1,14 @@
 package cri
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
+	"time"
 
 	"toy-kubernetes/api"
 )
@@ -12,14 +17,12 @@ var ErrNotFound = errors.New("container not found")
 
 type State string
 
-// State の文字列値は Go client と C runtime の protocol で共有する
 const (
 	Running State = "Running"
 	Stopped State = "Stopped"
 )
 
-// Unix socket の JSON protocol で Go client と C runtime が共有する状態
-// JSON tag は C runtime の response field 名と一致させる
+// kubelet とコンテナランタイムが扱うコンテナの状態
 type Container struct {
 	ID      string `json:"id"`
 	PodName string `json:"pod"`
@@ -33,50 +36,97 @@ type CRI interface {
 	Stop(context.Context, string) error
 }
 
-// TODO: 現在は kubelet の reconcile を確認するため in-memory runtime を使っている。
-// 最終的には Unix socket の CRI client に置き換え、実際の runtime process へ接続する。
-type FakeCRI struct {
-	containers map[string]Container
-	nextID     int
+// Unix socket 経由でコンテナ runtime を操作する CRI client
+type Client struct {
+	socket  string
+	timeout time.Duration
 }
 
-var _ CRI = (*FakeCRI)(nil)
+var _ CRI = (*Client)(nil)
 
-func NewFakeCRI() *FakeCRI {
-	return &FakeCRI{containers: make(map[string]Container)}
+func NewClient(socket string) *Client {
+	return &Client{socket: socket, timeout: 5 * time.Second}
 }
 
-func (runtime *FakeCRI) List(context.Context) ([]Container, error) {
-	containers := make([]Container, 0, len(runtime.containers))
-	for _, container := range runtime.containers {
-		containers = append(containers, container)
-	}
-	return containers, nil
+type request struct {
+	Operation string `json:"op"`
+	Pod       string `json:"pod,omitempty"`
+	Image     string `json:"image,omitempty"`
 }
 
-func (runtime *FakeCRI) Run(_ context.Context, pod api.Pod) (Container, error) {
-	if container, ok := runtime.containers[pod.Name]; ok {
-		container.State = Running
-		runtime.containers[pod.Name] = container
-		return container, nil
-	}
-
-	runtime.nextID++
-	container := Container{
-		ID:      fmt.Sprintf("fake-%d", runtime.nextID),
-		PodName: pod.Name,
-		State:   Running,
-	}
-	runtime.containers[pod.Name] = container
-	return container, nil
+type response struct {
+	OK         bool        `json:"ok"`
+	Error      string      `json:"error,omitempty"`
+	ID         string      `json:"id,omitempty"`
+	Pod        string      `json:"pod,omitempty"`
+	State      State       `json:"state,omitempty"`
+	Containers []Container `json:"containers,omitempty"`
 }
 
-func (runtime *FakeCRI) Stop(_ context.Context, podName string) error {
-	container, ok := runtime.containers[podName]
-	if !ok {
-		return ErrNotFound
+func (client *Client) List(ctx context.Context) ([]Container, error) {
+	result, err := client.request(ctx, request{Operation: "list"})
+	if err != nil {
+		return nil, err
 	}
-	container.State = Stopped
-	runtime.containers[podName] = container
-	return nil
+	return result.Containers, nil
+}
+
+func (client *Client) Run(ctx context.Context, pod api.Pod) (Container, error) {
+	if len(pod.Spec.Containers) == 0 {
+		return Container{}, errors.New("Pod has no container")
+	}
+
+	result, err := client.request(ctx, request{
+		Operation: "run",
+		Pod:       pod.Name,
+		Image:     pod.Spec.Containers[0].Image,
+	})
+	if err != nil {
+		return Container{}, err
+	}
+	return Container{ID: result.ID, PodName: result.Pod, State: result.State}, nil
+}
+
+func (client *Client) Stop(ctx context.Context, podName string) error {
+	_, err := client.request(ctx, request{Operation: "stop", Pod: podName})
+	return err
+}
+
+func (client *Client) Inspect(ctx context.Context, podName string) (Container, error) {
+	result, err := client.request(ctx, request{Operation: "inspect", Pod: podName})
+	if err != nil {
+		return Container{}, err
+	}
+	return Container{ID: result.ID, PodName: result.Pod, State: result.State}, nil
+}
+
+func (client *Client) request(ctx context.Context, input request) (response, error) {
+	connection, err := (&net.Dialer{Timeout: client.timeout}).DialContext(ctx, "unix", client.socket)
+	if err != nil {
+		return response{}, fmt.Errorf("connect CRI socket: %w", err)
+	}
+	defer connection.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = connection.SetDeadline(deadline)
+	} else {
+		_ = connection.SetWriteDeadline(time.Now().Add(client.timeout))
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		return response{}, fmt.Errorf("encode CRI request: %w", err)
+	}
+	if _, err := fmt.Fprintf(connection, "%s\n", data); err != nil {
+		return response{}, fmt.Errorf("write CRI request: %w", err)
+	}
+
+	var result response
+	if err := json.NewDecoder(bufio.NewReader(connection)).Decode(&result); err != nil {
+		return response{}, fmt.Errorf("decode CRI response: %w", err)
+	}
+	if !result.OK {
+		return response{}, fmt.Errorf("CRI request failed: %s", strings.TrimSpace(result.Error))
+	}
+	return result, nil
 }

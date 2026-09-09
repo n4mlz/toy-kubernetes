@@ -72,7 +72,7 @@ Kubelet は worker namespace に常駐する node agent であり、runtime や 
 
 ### CRI runtime と CNI
 
-CRI runtime は kubelet からの簡易 CRI protocol を受け、nginx bundle の container lifecycle を実行する。CRI runtime は C で実装し、rootfs、process、namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri とする。
+CRI runtime は kubelet からの簡易 CRI protocol を受け、OCI bundle の `config.json` にある process.args に従って container lifecycle を実行する。CRI runtime は rootful に動作し、コンテナ process の rootfs、PID、mount、UTS、network namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri/runtime とする。
 
 CNI は Pod network namespace と worker の bridge を veth pair で接続し、Pod IP と route を設定する。CNI は network resource を作る imperative な effector である。
 
