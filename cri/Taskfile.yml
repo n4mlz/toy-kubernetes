@@ -4,12 +4,12 @@ tasks:
   build:
     silent: true
     cmds:
-      - echo '[cri] build ok (no source yet)'
+      - go test -run '^$' ./cri
 
   test:
     silent: true
     cmds:
-      - echo '[cri] test ok (no tests yet)'
+      - go test ./cri
 
   check:
     silent: true

@@ -4,12 +4,12 @@ tasks:
   build:
     silent: true
     cmds:
-      - echo '[kubelet] build ok (no source yet)'
+      - go test -run '^$' ./kubelet
 
   test:
     silent: true
     cmds:
-      - echo '[kubelet] test ok (no tests yet)'
+      - go test ./kubelet
 
   check:
     silent: true
