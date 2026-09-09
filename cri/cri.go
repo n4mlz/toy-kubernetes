@@ -12,15 +12,18 @@ var ErrNotFound = errors.New("container not found")
 
 type State string
 
+// State の文字列値は Go client と C runtime の protocol で共有する
 const (
 	Running State = "Running"
 	Stopped State = "Stopped"
 )
 
+// Unix socket の JSON protocol で Go client と C runtime が共有する状態
+// JSON tag は C runtime の response field 名と一致させる
 type Container struct {
-	ID      string
-	PodName string
-	State   State
+	ID      string `json:"id"`
+	PodName string `json:"pod"`
+	State   State  `json:"state"`
 }
 
 // kubelet が Pod の実行状態を操作するための CRI の interface

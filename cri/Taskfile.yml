@@ -1,9 +1,15 @@
 version: '3'
 
 tasks:
+  prepare-bundle:
+    silent: true
+    cmds:
+      - sh ./cri/prepare-nginx-bundle.sh
+
   build:
     silent: true
     cmds:
+      - cc -std=c17 -Wall -Wextra -Werror -o /tmp/toy-cri ./cri/runtime.c
       - go test -run '^$' ./cri
 
   test:
@@ -22,6 +28,7 @@ tasks:
     silent: true
     cmds:
       - "command -v cc >/dev/null 2>&1 && echo '[cri] C compiler ok' || { echo '[cri] C compiler failed'; exit 1; }"
+      - "command -v docker >/dev/null 2>&1 && echo '[cri] Docker ok' || { echo '[cri] Docker failed'; exit 1; }"
       - "command -v unshare >/dev/null 2>&1 && echo '[cri] unshare ok' || { echo '[cri] unshare failed'; exit 1; }"
       - "command -v mount >/dev/null 2>&1 && echo '[cri] mount ok' || { echo '[cri] mount failed'; exit 1; }"
 
