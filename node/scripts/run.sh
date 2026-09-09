@@ -29,6 +29,7 @@ fi
 command -v ip >/dev/null 2>&1 || { echo '[node] ip failed' >&2; exit 1; }
 test -x /tmp/node-supervisor || { echo '[node] node-supervisor is not built' >&2; exit 1; }
 test -x /tmp/runtime || { echo '[node] runtime is not built' >&2; exit 1; }
+test -x /tmp/kubelet || { echo '[node] kubelet is not built' >&2; exit 1; }
 
 root_dir=${TOY_NODE_ROOT:-/tmp/toy-kubernetes-nodes}
 bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)/bundles
@@ -51,6 +52,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 node_names=control-plane
+# TODO: control plane bootstrap should place its static Pod manifests in this directory before startup.
 for index in $(seq 1 "$workers"); do
 	node_names="$node_names worker-$index"
 done
@@ -71,6 +73,8 @@ for node_name in $node_names; do
 		--node "$node_name" \
 		--socket "$node_dir/runtime.sock" \
 		--bundle-dir "$bundle_dir" \
+		--manifests "$node_dir/manifests" \
+		--api-server "${TOY_API_SERVER:-}" \
 		--log-dir "$node_dir/logs" &
 	supervisor_pids="$supervisor_pids $!"
 done

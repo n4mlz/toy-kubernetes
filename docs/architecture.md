@@ -70,6 +70,8 @@ nodeName が空の Pod と Ready な Node を観測し、Pod を worker に bind
 
 Kubelet は worker namespace に常駐する node agent であり、runtime や CNI の内部処理を直接担当しない。
 
+control plane 用 kubelet は API server のリソースを待たず、node の local manifest directory を desired state として扱う。manifest の追加・更新・削除を検出し、static Pod を CRI runtime に起動・停止させる。API server URL が設定されている場合は、static Pod に対応する mirror Pod も API server に登録する。mirror Pod は API 上の表示であり、local manifest が source of truth である。
+
 ### CRI runtime と CNI
 
 CRI runtime は kubelet からの簡易 CRI protocol を受け、OCI bundle の `config.json` にある process.args に従って container lifecycle を実行する。CRI runtime は rootful に動作し、コンテナ process の rootfs、PID、mount、UTS、network namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri/runtime とする。

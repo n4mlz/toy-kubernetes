@@ -24,14 +24,17 @@ func run() error {
 	flags := flag.NewFlagSet("node-supervisor", flag.ContinueOnError)
 	nodeName := flags.String("node", "", "node name")
 	runtimePath := flags.String("runtime", "/tmp/runtime", "container runtime path")
+	kubeletPath := flags.String("kubelet", "/tmp/kubelet", "kubelet path")
 	socketPath := flags.String("socket", "", "runtime socket path")
 	bundleDir := flags.String("bundle-dir", "bundles", "runtime bundle directory")
+	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
+	apiServer := flags.String("api-server", "", "API server URL")
 	logDir := flags.String("log-dir", "", "log directory")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if *nodeName == "" || *socketPath == "" || *logDir == "" {
-		return errors.New("node, socket and log-dir are required")
+	if *nodeName == "" || *socketPath == "" || *manifestDir == "" || *logDir == "" {
+		return errors.New("node, socket, manifests and log-dir are required")
 	}
 
 	if err := os.MkdirAll(*logDir, 0o755); err != nil {
@@ -41,11 +44,20 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	supervisor := node.NewSupervisor([]node.Unit{{
-		Name:    "runtime",
-		Path:    *runtimePath,
-		Args:    []string{"-socket", *socketPath, "-bundle-dir", filepath.Clean(*bundleDir)},
-		LogPath: filepath.Join(*logDir, "runtime.log"),
-	}})
+	units := []node.Unit{
+		{
+			Name:    "runtime",
+			Path:    *runtimePath,
+			Args:    []string{"-socket", *socketPath, "-bundle-dir", filepath.Clean(*bundleDir)},
+			LogPath: filepath.Join(*logDir, "runtime.log"),
+		},
+		{
+			Name:    "kubelet",
+			Path:    *kubeletPath,
+			Args:    []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer},
+			LogPath: filepath.Join(*logDir, "kubelet.log"),
+		},
+	}
+	supervisor := node.NewSupervisor(units)
 	return supervisor.Run(ctx)
 }

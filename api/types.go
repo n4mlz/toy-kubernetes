@@ -12,6 +12,7 @@ type ObjectMeta struct {
 	UID             string            `json:"uid,omitempty" yaml:"uid,omitempty"`
 	ResourceVersion int64             `json:"resourceVersion,omitempty" yaml:"resourceVersion,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 	OwnerReferences []OwnerReference  `json:"ownerReferences,omitempty" yaml:"ownerReferences,omitempty"`
 }
 

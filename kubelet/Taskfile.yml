@@ -4,7 +4,7 @@ tasks:
   build:
     silent: true
     cmds:
-      - go test -run '^$' ./kubelet
+      - go build -o /tmp/kubelet ./cmd/kubelet
 
   test:
     silent: true
