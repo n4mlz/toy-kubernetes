@@ -30,14 +30,15 @@ func run() error {
 	socketPath := flags.String("socket", "", "runtime socket path")
 	bundleDir := flags.String("bundle-dir", config.BundleDir, "runtime bundle directory")
 	nodeIndex := flags.Int("node-index", -1, "node network index")
+	nodeCount := flags.Int("node-count", 0, "number of nodes in the underlay")
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
 	apiServer := flags.String("api-server", "", "API server URL")
 	logDir := flags.String("log-dir", "", "log directory")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if *nodeName == "" || *nodeIndex < 0 || *socketPath == "" || *manifestDir == "" || *logDir == "" {
-		return errors.New("node, node-index, socket, manifests and log-dir are required")
+	if *nodeName == "" || *nodeIndex < 0 || *nodeCount < 1 || *socketPath == "" || *manifestDir == "" || *logDir == "" {
+		return errors.New("node, node-index, node-count, socket, manifests and log-dir are required")
 	}
 	podCIDR, gateway, err := bootstrap.NodeNetwork(*nodeIndex)
 	if err != nil {
@@ -50,6 +51,9 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := node.ConfigureNetwork(ctx, *nodeIndex, *nodeCount); err != nil {
+		return err
+	}
 
 	units := []node.Unit{
 		{

@@ -17,6 +17,11 @@ tasks:
     cmds:
       - sh ./node/scripts/run.sh {{.CLI_ARGS}}
 
+  test-network:
+    silent: true
+    cmds:
+      - sh ./node/scripts/test-network.sh
+
   check:
     silent: true
     cmds:

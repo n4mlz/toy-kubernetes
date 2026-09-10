@@ -178,6 +178,10 @@ worker-2: worker index から生成した Pod CIDR
 
 worker 間の underlay network を通じて、相手 worker の Pod CIDR への route を設定する。Pod network は worker network namespace 内の bridge に接続する。worker 数を増減しても、CIDR と route は worker index から生成する。
 
+起動時にホスト側の underlay bridge を作り、各 node namespace へ veth pair を接続する。`node-supervisor` は自分の node index から underlay address を決め、他 node の Pod CIDR への route と IPv4 forwarding を設定する。Pod から見た default route は従来どおり node 内の CNI bridge gateway であり、worker 間の route は node namespace の underlay に置く。
+
+`task node:test-network` は 2 worker を起動し、worker 間の Pod-to-Pod HTTP、片側 Pod の停止後に新しい Pod から同じ相手へ到達できること、終了時の network namespace cleanup を確認する。
+
 Service は専用の仮想 process を作らず、kube-proxy が worker namespace の forwarding rule として実現する。
 
 ## 仮想 node の作成と Kubernetes の起動

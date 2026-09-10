@@ -21,3 +21,18 @@ func TestSubnetAssignsOneNonOverlappingPodCIDRPerWorker(t *testing.T) {
 		t.Fatalf("workers should receive distinct Pod CIDRs: %s, %s", first, second)
 	}
 }
+
+func TestNodeUnderlayAddressUsesNodeIndex(t *testing.T) {
+	first, err := NodeUnderlayAddress(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NodeUnderlayAddress(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first.String() != "10.200.0.2" || second.String() != "10.200.0.3" {
+		t.Fatalf("underlay addresses should follow node indexes: %s, %s", first, second)
+	}
+}

@@ -11,6 +11,10 @@ const (
 	NodePrefix         = 24
 	BridgeName         = "cni0"
 	GatewayHost        = 1
+	UnderlayBridge     = "toy-underlay0"
+	UnderlayInterface  = "underlay0"
+	UnderlayCIDR       = "10.200.0.0/24"
+	FirstNodeHost      = 2
 
 	BinaryDir   = ".toy/bin"
 	NodeDataDir = ".toy/nodes"
