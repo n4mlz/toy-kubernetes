@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"toy-kubernetes/apiserver"
 	"toy-kubernetes/cri"
@@ -29,7 +28,6 @@ func run() error {
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
 	socket := flags.String("socket", "", "CRI socket path")
 	apiServer := flags.String("api-server", "", "API server URL")
-	interval := flags.Duration("interval", time.Second, "reconcile interval")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -46,16 +44,8 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	for {
-		if err := worker.Reconcile(ctx); err != nil {
-			log.Printf("reconcile: %v", err)
-		}
-		timer := time.NewTimer(*interval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-timer.C:
-		}
+	if err := worker.Run(ctx); err != nil && ctx.Err() == nil {
+		log.Printf("run: %v", err)
 	}
+	return nil
 }

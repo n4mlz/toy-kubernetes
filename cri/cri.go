@@ -45,10 +45,17 @@ const (
 	Workload  SandboxSource = "workload"
 )
 
+type Event struct {
+	Type      string
+	Container Container
+	Sandbox   Sandbox
+}
+
 // kubelet が Pod の実行状態を操作するための CRI の interface
 type CRI interface {
 	List(context.Context) ([]Container, error)
 	ListSandboxes(context.Context) ([]Sandbox, error)
+	Watch(context.Context) (<-chan Event, error)
 	RunPodSandbox(context.Context, api.Pod, SandboxSource) (Sandbox, error)
 	RunInSandbox(context.Context, api.Pod, string) (Container, error)
 	Stop(context.Context, string) error
@@ -86,6 +93,57 @@ type response struct {
 	IP         string        `json:"ip,omitempty"`
 	Containers []Container   `json:"containers,omitempty"`
 	Sandboxes  []Sandbox     `json:"sandboxes,omitempty"`
+	EventType  string        `json:"eventType,omitempty"`
+	Container  Container     `json:"container,omitempty"`
+	Sandbox    Sandbox       `json:"sandbox,omitempty"`
+}
+
+func (client *Client) Watch(ctx context.Context) (<-chan Event, error) {
+	connection, err := (&net.Dialer{Timeout: client.timeout}).DialContext(ctx, "unix", client.socket)
+	if err != nil {
+		return nil, fmt.Errorf("connect CRI watch: %w", err)
+	}
+	if _, err := fmt.Fprintln(connection, `{"op":"watch"}`); err != nil {
+		connection.Close()
+		return nil, fmt.Errorf("write CRI watch request: %w", err)
+	}
+	decoder := json.NewDecoder(bufio.NewReader(connection))
+	var accepted response
+	if err := decoder.Decode(&accepted); err != nil {
+		connection.Close()
+		return nil, fmt.Errorf("decode CRI watch response: %w", err)
+	}
+	if !accepted.OK {
+		connection.Close()
+		return nil, fmt.Errorf("CRI watch failed: %s", strings.TrimSpace(accepted.Error))
+	}
+
+	events := make(chan Event)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = connection.Close()
+		case <-done:
+		}
+	}()
+	go func() {
+		defer close(events)
+		defer connection.Close()
+		defer close(done)
+		for {
+			var value response
+			if err := decoder.Decode(&value); err != nil {
+				return
+			}
+			select {
+			case events <- Event{Type: value.EventType, Container: value.Container, Sandbox: value.Sandbox}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return events, nil
 }
 
 func (client *Client) List(ctx context.Context) ([]Container, error) {

@@ -70,6 +70,8 @@ nodeName が空の Pod と Ready な Node を観測し、Pod を worker に bind
 
 Kubelet は worker namespace に常駐する node agent であり、runtime や CNI の内部処理を直接担当しない。
 
+API server を使う kubelet は初回 List の後に担当 Pod を watch し、変更が届いた時に desired state を再確認する。control plane の static Pod は API server の外にある local manifest が source of truth なので、manifest directory と CRI の状態変更を watch して再確認する。
+
 control plane 用 kubelet は API server のリソースを待たず、node の local manifest directory を desired state として扱う。manifest の追加・更新・削除を検出し、static Pod を CRI runtime に起動・停止させる。CRI の PodSandbox には `staticPod` または `workload` の source を付け、manifest から消えた static Pod の sandbox だけを停止する。API server URL が設定されている場合は、static Pod に対応する mirror Pod も API server に登録する。mirror Pod は API 上の表示であり、local manifest が source of truth である。
 
 ### CRI runtime と CNI
@@ -82,7 +84,7 @@ CNI は Pod network namespace と worker の bridge を veth pair で接続し�
 
 API server が Service 作成時に `config/const.go` の Service CIDR から ClusterIP を割り当てる。`type: NodePort` の Service には NodePort 範囲からも port を割り当てる。kube-proxy は Service と Running Pod を観測し、selector に一致する Pod を endpoint として worker namespace の nftables に反映する。Service の ClusterIP:port または NodePort への TCP を、endpoint の Pod IP:targetPort へ DNAT する。
 
-この toy 実装では kube-proxy は一定間隔で List して forwarding state 全体を置き換える。endpoint の増減や Service 削除時に古い rule を残さないことを優先した単純化であり、watch と本家 kube-proxy の複雑な rule 管理は対象外とする。
+この toy 実装では kube-proxy は初回 List の後に Service と Pod を watch し、変更時に forwarding state 全体を置き換える。endpoint の増減や Service 削除時に古い rule を残さないことを優先し、本家 kube-proxy の複雑な rule 管理は対象外とする。
 
 ## 主要な状態遷移
 
@@ -231,7 +233,7 @@ task run
 3. kubelet が CRI runtime に etcd、kube-apiserver、kube-scheduler、kube-controller-manager の static Pod を起動させる
 4. API server の readiness を待つ
 5. worker の kubelet と CRI runtime を起動し、Node object を登録する
-6. API server 起動後に kube-proxy を worker 上の通常 workload として起動する
+6. API server 起動後に worker の node supervisor が kube-proxy を起動する。DaemonSet は未実装のため、これは本家との差分である
 7. kubelet が API state と CRI runtime state を reconcile する
 
 実 Kubernetes でも、kubelet と container runtime は host service manager から起動し、kubeadm の control plane component は kubelet が static Pod として起動する。この toy implementation では、その host service manager と static Pod の境界を、仮想 node と node supervisor で見える形にする。

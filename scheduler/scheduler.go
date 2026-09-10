@@ -24,8 +24,7 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// TODO: 現在は control plane Node を登録していないため、Ready な Node を worker とみなす。
-	// 正しくは role label や taint を見て、通常の Pod を worker にだけ割り当てる。
+	// control plane は Node resource として登録しないため、登録済みの Ready な Node は worker とみなす
 
 	pods, err := scheduler.apiClient.Pods().List(ctx)
 	if err != nil {
@@ -51,6 +50,39 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (scheduler *Scheduler) Run(ctx context.Context) error {
+	// Pod または Node の変更を契機に、未割り当て Pod の bind を再確認する
+	return api.Run(ctx, scheduler, scheduler.watch)
+}
+
+func (scheduler *Scheduler) watch(ctx context.Context) (<-chan error, error) {
+	return api.CombineWatches(ctx, scheduler.watchNodes, scheduler.watchPods)
+}
+
+func (scheduler *Scheduler) watchNodes(ctx context.Context) (<-chan error, error) {
+	nodes, err := scheduler.apiClient.Nodes().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := scheduler.apiClient.Nodes().Watch(ctx, nodes.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
+}
+
+func (scheduler *Scheduler) watchPods(ctx context.Context) (<-chan error, error) {
+	pods, err := scheduler.apiClient.Pods().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := scheduler.apiClient.Pods().Watch(ctx, pods.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
 }
 
 func nextReadyNode(nodes []api.Node, start int) (api.Node, int, bool) {

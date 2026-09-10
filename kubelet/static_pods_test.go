@@ -76,6 +76,10 @@ type staticRuntime struct {
 	stoppedSandboxes []string
 }
 
+func (runtime *staticRuntime) Watch(context.Context) (<-chan cri.Event, error) {
+	return make(chan cri.Event), nil
+}
+
 func (runtime *staticRuntime) ListSandboxes(context.Context) ([]cri.Sandbox, error) {
 	return runtime.sandboxes, nil
 }

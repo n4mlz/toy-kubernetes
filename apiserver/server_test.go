@@ -1,10 +1,7 @@
 package apiserver
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -76,17 +73,10 @@ func TestClientListAndWatchObserveTheSamePod(t *testing.T) {
 
 	watchContext, cancelWatch := context.WithCancel(context.Background())
 	defer cancelWatch()
-	watchRequest, err := http.NewRequestWithContext(watchContext, http.MethodGet, server.URL+"/watch/pods?resourceVersion="+fmt.Sprint(list.ResourceVersion), nil)
+	events, err := client.Pods().Watch(watchContext, list.ResourceVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
-	watchResponse, err := http.DefaultClient.Do(watchRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer watchResponse.Body.Close()
-	watchEvents := bufio.NewScanner(watchResponse.Body)
 
 	if _, err := client.Pods().Create(context.Background(), api.Pod{
 		ObjectMeta: api.ObjectMeta{Name: "nginx"},
@@ -95,18 +85,14 @@ func TestClientListAndWatchObserveTheSamePod(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !watchEvents.Scan() {
-		t.Fatalf("watch should publish the created Pod: %v", watchEvents.Err())
-	}
-	var event struct {
-		Type   etcd.EventType `json:"type"`
-		Object api.Pod        `json:"object"`
-	}
-	if err := json.Unmarshal(watchEvents.Bytes(), &event); err != nil {
-		t.Fatal(err)
+	var event WatchEvent[api.Pod]
+	select {
+	case event = <-events:
+	case <-time.After(time.Second):
+		t.Fatal("watch should publish the created Pod")
 	}
 
-	if event.Type != etcd.Added || event.Object.Name != "nginx" || event.Object.ResourceVersion == 0 {
+	if event.Err != nil || event.Type != string(etcd.Added) || event.Object.Name != "nginx" || event.Object.ResourceVersion == 0 {
 		t.Fatalf("watch should publish an ADDED event for nginx: %#v", event)
 	}
 

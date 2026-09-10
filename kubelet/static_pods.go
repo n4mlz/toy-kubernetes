@@ -8,12 +8,56 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"toy-kubernetes/api"
 	"toy-kubernetes/cri"
 
+	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
 )
+
+// manifest directory の変更を通知する。変更後の desired state は再度読み込む
+func WatchStaticPods(ctx context.Context, directory string) (<-chan struct{}, error) {
+	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC)
+	if err != nil {
+		return nil, fmt.Errorf("watch static Pod directory: %w", err)
+	}
+	if _, err := unix.InotifyAddWatch(fd, directory, unix.IN_CREATE|unix.IN_DELETE|unix.IN_MODIFY|unix.IN_MOVED_FROM|unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE); err != nil {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("watch static Pod directory: %w", err)
+	}
+
+	changes := make(chan struct{}, 1)
+	var closeOnce sync.Once
+	closeFD := func() { closeOnce.Do(func() { _ = unix.Close(fd) }) }
+	go func() {
+		defer close(changes)
+		defer closeFD()
+		buffer := make([]byte, 4096)
+		for {
+			count, err := unix.Read(fd, buffer)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				return
+			}
+			if count == 0 {
+				continue
+			}
+			select {
+			case changes <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		closeFD()
+	}()
+	return changes, nil
+}
 
 // manifest directory の Pod manifest を読み込む
 func LoadStaticPods(directory string) ([]api.Pod, error) {

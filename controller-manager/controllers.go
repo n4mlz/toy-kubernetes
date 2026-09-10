@@ -10,6 +10,22 @@ import (
 	"toy-kubernetes/apiserver"
 )
 
+// Deployment と ReplicaSet の controller を同じ controller-manager で起動する
+func Run(ctx context.Context, client *apiserver.Client) error {
+	deployment := NewDeploymentController(client)
+	replicaSet := NewReplicaSetController(client)
+	errors := make(chan error, 2)
+	go func() { errors <- deployment.Run(ctx) }()
+	go func() { errors <- replicaSet.Run(ctx) }()
+
+	for range 2 {
+		if err := <-errors; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type DeploymentController struct {
 	apiClient *apiserver.Client
 }
@@ -57,6 +73,39 @@ func (controller *DeploymentController) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+func (controller *DeploymentController) Run(ctx context.Context) error {
+	// Deployment または ReplicaSet の変更を契機に、管理対象の ReplicaSet を再確認する
+	return api.Run(ctx, controller, controller.watch)
+}
+
+func (controller *DeploymentController) watch(ctx context.Context) (<-chan error, error) {
+	return api.CombineWatches(ctx, controller.watchDeployments, controller.watchReplicaSets)
+}
+
+func (controller *DeploymentController) watchDeployments(ctx context.Context) (<-chan error, error) {
+	deployments, err := controller.apiClient.Deployments().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := controller.apiClient.Deployments().Watch(ctx, deployments.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
+}
+
+func (controller *DeploymentController) watchReplicaSets(ctx context.Context) (<-chan error, error) {
+	replicaSets, err := controller.apiClient.ReplicaSets().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := controller.apiClient.ReplicaSets().Watch(ctx, replicaSets.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
+}
+
 type ReplicaSetController struct {
 	apiClient *apiserver.Client
 }
@@ -88,6 +137,39 @@ func (controller *ReplicaSetController) Reconcile(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (controller *ReplicaSetController) Run(ctx context.Context) error {
+	// ReplicaSet または Pod の変更を契機に、Pod 数と status を再確認する
+	return api.Run(ctx, controller, controller.watch)
+}
+
+func (controller *ReplicaSetController) watch(ctx context.Context) (<-chan error, error) {
+	return api.CombineWatches(ctx, controller.watchReplicaSets, controller.watchPods)
+}
+
+func (controller *ReplicaSetController) watchReplicaSets(ctx context.Context) (<-chan error, error) {
+	replicaSets, err := controller.apiClient.ReplicaSets().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := controller.apiClient.ReplicaSets().Watch(ctx, replicaSets.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
+}
+
+func (controller *ReplicaSetController) watchPods(ctx context.Context) (<-chan error, error) {
+	pods, err := controller.apiClient.Pods().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := controller.apiClient.Pods().Watch(ctx, pods.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
 }
 
 // ReplicaSet の管理対象の Pod を増減させ、desired replicas に収束させる

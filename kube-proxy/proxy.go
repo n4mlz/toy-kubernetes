@@ -54,6 +54,39 @@ func (proxy *KubeProxy) Reconcile(ctx context.Context) error {
 	return proxy.forwarder.Replace(ctx, rules)
 }
 
+// Service または Pod の変更を契機に、forwarding state を再構成する
+func (proxy *KubeProxy) Run(ctx context.Context) error {
+	return api.Run(ctx, proxy, proxy.watch)
+}
+
+func (proxy *KubeProxy) watch(ctx context.Context) (<-chan error, error) {
+	return api.CombineWatches(ctx, proxy.watchServices, proxy.watchPods)
+}
+
+func (proxy *KubeProxy) watchServices(ctx context.Context) (<-chan error, error) {
+	services, err := proxy.apiClient.Services().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := proxy.apiClient.Services().Watch(ctx, services.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
+}
+
+func (proxy *KubeProxy) watchPods(ctx context.Context) (<-chan error, error) {
+	pods, err := proxy.apiClient.Pods().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := proxy.apiClient.Pods().Watch(ctx, pods.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
+}
+
 // Service selector に一致し、Running になっている Pod だけを endpoint にする
 func serviceRules(services []api.Service, pods []api.Pod) ([]Rule, error) {
 	rules := make([]Rule, 0)

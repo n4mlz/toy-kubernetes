@@ -29,6 +29,7 @@ type Runtime struct {
 	mu         sync.Mutex
 	containers map[string]*managedContainer
 	sandboxes  map[string]*managedSandbox
+	watchers   map[chan cri.Event]struct{}
 }
 
 type managedSandbox struct {
@@ -65,6 +66,9 @@ type response struct {
 	IP         string            `json:"ip,omitempty"`
 	Containers []cri.Container   `json:"containers,omitempty"`
 	Sandboxes  []cri.Sandbox     `json:"sandboxes,omitempty"`
+	EventType  string            `json:"eventType,omitempty"`
+	Container  cri.Container     `json:"container,omitempty"`
+	Sandbox    cri.Sandbox       `json:"sandbox,omitempty"`
 }
 
 type bundleConfig struct {
@@ -86,6 +90,7 @@ func NewRuntime(socketPath, bundleDir string) *Runtime {
 		bundleDir:  bundleDir,
 		containers: make(map[string]*managedContainer),
 		sandboxes:  make(map[string]*managedSandbox),
+		watchers:   make(map[chan cri.Event]struct{}),
 	}
 }
 
@@ -134,6 +139,10 @@ func (runtime *Runtime) handleConnection(connection net.Conn) {
 		writeResponse(connection, response{Error: "invalid CRI request"})
 		return
 	}
+	if input.Operation == "watch" {
+		runtime.watch(connection)
+		return
+	}
 
 	result, err := runtime.handleRequest(input)
 	if err != nil {
@@ -143,6 +152,46 @@ func (runtime *Runtime) handleConnection(connection net.Conn) {
 
 	result.OK = true
 	writeResponse(connection, result)
+}
+
+func (runtime *Runtime) watch(connection net.Conn) {
+	events := make(chan cri.Event, 1)
+	runtime.mu.Lock()
+	runtime.watchers[events] = struct{}{}
+	runtime.mu.Unlock()
+	defer func() {
+		runtime.mu.Lock()
+		delete(runtime.watchers, events)
+		runtime.mu.Unlock()
+		close(events)
+	}()
+
+	if err := json.NewEncoder(connection).Encode(response{OK: true}); err != nil {
+		return
+	}
+	encoder := json.NewEncoder(connection)
+	for event := range events {
+		if err := encoder.Encode(response{
+			OK:        true,
+			EventType: event.Type,
+			Container: event.Container,
+			Sandbox:   event.Sandbox,
+		}); err != nil {
+			return
+		}
+	}
+}
+
+func (runtime *Runtime) publish(event cri.Event) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	for events := range runtime.watchers {
+		// List が正本なので、連続した状態変更は一つにまとめても再同期できる
+		select {
+		case events <- event:
+		default:
+		}
+	}
 }
 
 func writeResponse(connection net.Conn, result response) {
@@ -212,20 +261,22 @@ func (runtime *Runtime) listSandboxes() response {
 
 func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) (cri.Sandbox, error) {
 	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
 	for _, sandbox := range runtime.sandboxes {
 		if sandbox.sandbox.PodName == podName && sandbox.sandbox.Source == source && sandbox.sandbox.State == cri.Running {
+			runtime.mu.Unlock()
 			return sandbox.sandbox, nil
 		}
 	}
 	reader, writer, err := os.Pipe()
 	if err != nil {
+		runtime.mu.Unlock()
 		return cri.Sandbox{}, err
 	}
 	command := exec.Command(os.Args[0], "--sandbox-child", "--network-ready-fd", "3")
 	command.ExtraFiles = []*os.File{reader}
 	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWNET}
 	if err := command.Start(); err != nil {
+		runtime.mu.Unlock()
 		return cri.Sandbox{}, err
 	}
 	_ = reader.Close()
@@ -235,18 +286,22 @@ func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) 
 		result, err = runtime.network.Add(context.Background(), podName, netnsPath)
 		if err != nil {
 			_ = command.Process.Kill()
+			runtime.mu.Unlock()
 			return cri.Sandbox{}, err
 		}
 	}
 	if _, err := writer.Write([]byte{1}); err != nil {
 		_ = command.Process.Kill()
+		runtime.mu.Unlock()
 		return cri.Sandbox{}, err
 	}
 	_ = writer.Close()
 	id := fmt.Sprintf("sandbox-%d", command.Process.Pid)
 	sandbox := &managedSandbox{sandbox: cri.Sandbox{ID: id, PodName: podName, Source: source, IP: result.IP.String(), State: cri.Running}, process: command.Process, done: make(chan struct{}), netnsPath: netnsPath}
 	runtime.sandboxes[id] = sandbox
+	runtime.mu.Unlock()
 	go func() { _ = command.Wait(); close(sandbox.done) }()
+	runtime.publish(cri.Event{Type: "sandbox-added", Sandbox: sandbox.sandbox})
 	return sandbox.sandbox, nil
 }
 
@@ -278,6 +333,7 @@ func (runtime *Runtime) runInSandbox(podName, image, sandboxID string) (cri.Cont
 	runtime.containers[podName] = managed
 	runtime.mu.Unlock()
 	go runtime.waitForContainer(podName, started, managed.done)
+	runtime.publish(cri.Event{Type: "container-added", Container: container})
 	return container, nil
 }
 
@@ -297,7 +353,10 @@ func (runtime *Runtime) stopPodSandbox(id string) error {
 		_ = runtime.network.Del(context.Background(), sandbox.sandbox.PodName, sandbox.netnsPath)
 	}
 	_ = sandbox.process.Kill()
+	runtime.mu.Lock()
 	delete(runtime.sandboxes, id)
+	runtime.mu.Unlock()
+	runtime.publish(cri.Event{Type: "sandbox-removed", Sandbox: sandbox.sandbox})
 	return nil
 }
 
@@ -356,11 +415,16 @@ func (runtime *Runtime) waitForContainer(podName string, command *exec.Cmd, done
 		_ = runtime.network.Del(context.Background(), podName, managed.netnsPath)
 	}
 	runtime.mu.Lock()
+	var stopped cri.Container
 	if managed, ok := runtime.containers[podName]; ok && managed.done == done {
 		managed.container.State = cri.Stopped
 		managed.process = nil
+		stopped = managed.container
 	}
 	runtime.mu.Unlock()
+	if stopped.ID != "" {
+		runtime.publish(cri.Event{Type: "container-stopped", Container: stopped})
+	}
 	close(done)
 }
 

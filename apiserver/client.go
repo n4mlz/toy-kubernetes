@@ -1,6 +1,7 @@
 package apiserver
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -34,6 +35,28 @@ type ResourceClient[T any] struct {
 type ResourceList[T any] struct {
 	ResourceVersion int64 `json:"resourceVersion"`
 	Items           []T   `json:"items"`
+}
+
+type WatchEvent[T any] struct {
+	Type            string
+	Object          T
+	ResourceVersion int64
+	Err             error
+}
+
+func WatchErrors[T any](ctx context.Context, events <-chan WatchEvent[T]) <-chan error {
+	errors := make(chan error, 1)
+	go func() {
+		defer close(errors)
+		select {
+		case event, ok := <-events:
+			if ok {
+				errors <- event.Err
+			}
+		case <-ctx.Done():
+		}
+	}()
+	return errors
 }
 
 func (client *Client) Pods() *ResourceClient[api.Pod] {
@@ -84,6 +107,50 @@ func (resources *ResourceClient[T]) List(ctx context.Context) (ResourceList[T], 
 	}
 
 	return objects, nil
+}
+
+// List の revision より後に発生した resource event を受け取る
+func (resources *ResourceClient[T]) Watch(ctx context.Context, resourceVersion int64) (<-chan WatchEvent[T], error) {
+	path := fmt.Sprintf("/watch/%s?resourceVersion=%d", resources.resource, resourceVersion)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, resources.client.baseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create watch request: %w", err)
+	}
+	response, err := resources.client.httpClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("open %s watch: %w", resources.resource, err)
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		defer response.Body.Close()
+		return nil, fmt.Errorf("open %s watch: API request failed with status %d", resources.resource, response.StatusCode)
+	}
+
+	events := make(chan WatchEvent[T])
+	go func() {
+		defer close(events)
+		defer response.Body.Close()
+		scanner := bufio.NewScanner(response.Body)
+		for scanner.Scan() {
+			var value struct {
+				Type   string          `json:"type"`
+				Object json.RawMessage `json:"object"`
+			}
+			if err := json.Unmarshal(scanner.Bytes(), &value); err != nil {
+				events <- WatchEvent[T]{Err: fmt.Errorf("decode %s watch event: %w", resources.resource, err)}
+				return
+			}
+			var object T
+			if err := json.Unmarshal(value.Object, &object); err != nil {
+				events <- WatchEvent[T]{Err: fmt.Errorf("decode %s watch object: %w", resources.resource, err)}
+				return
+			}
+			events <- WatchEvent[T]{Type: value.Type, Object: object}
+		}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			events <- WatchEvent[T]{Err: fmt.Errorf("read %s watch: %w", resources.resource, err)}
+		}
+	}()
+	return events, nil
 }
 
 func (resources *ResourceClient[T]) Update(ctx context.Context, name string, object T) (T, error) {

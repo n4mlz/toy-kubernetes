@@ -96,6 +96,71 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+// Pod、static manifest、CRI の変更を契機に、担当 Pod の desired state を再確認する
+func (kubelet *Kubelet) Run(ctx context.Context) error {
+	return api.Run(ctx, kubelet, kubelet.watch)
+}
+
+func (kubelet *Kubelet) watch(ctx context.Context) (<-chan error, error) {
+	if kubelet.apiClient == nil {
+		return api.CombineWatches(ctx, kubelet.watchManifests, kubelet.watchRuntime)
+	}
+
+	pods, err := kubelet.apiClient.Pods().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := kubelet.apiClient.Pods().Watch(ctx, pods.ResourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	return apiserver.WatchErrors(ctx, events), nil
+}
+
+func (kubelet *Kubelet) watchManifests(ctx context.Context) (<-chan error, error) {
+	changes, err := WatchStaticPods(ctx, kubelet.manifestDir)
+	if err != nil {
+		return nil, err
+	}
+	return changeErrors(ctx, changes), nil
+}
+
+func (kubelet *Kubelet) watchRuntime(ctx context.Context) (<-chan error, error) {
+	events, err := kubelet.runtime.Watch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return criEventErrors(ctx, events), nil
+}
+
+func changeErrors(ctx context.Context, changes <-chan struct{}) <-chan error {
+	errors := make(chan error, 1)
+	go func() {
+		defer close(errors)
+		select {
+		case <-changes:
+			errors <- nil
+		case <-ctx.Done():
+		}
+	}()
+	return errors
+}
+
+func criEventErrors(ctx context.Context, events <-chan cri.Event) <-chan error {
+	errors := make(chan error, 1)
+	go func() {
+		defer close(errors)
+		select {
+		case _, ok := <-events:
+			if ok {
+				errors <- nil
+			}
+		case <-ctx.Done():
+		}
+	}()
+	return errors
+}
+
 func (kubelet *Kubelet) runPod(ctx context.Context, pod api.Pod) error {
 	sandbox, err := kubelet.runtime.RunPodSandbox(ctx, pod, cri.Workload)
 	if err != nil {
