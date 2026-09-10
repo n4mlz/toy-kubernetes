@@ -4,7 +4,8 @@ tasks:
   build:
     silent: true
     cmds:
-      - go build -o /tmp/toyctl ./cmd/toyctl
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/toyctl ./cmd/toyctl
 
   test:
     silent: true

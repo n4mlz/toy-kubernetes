@@ -6,19 +6,19 @@ bundle_dir=${1:-bundles}
 image=toy-kubernetes-nginx:latest
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 work_dir=$(mktemp -d)
-container_id=
+docker_container_id=
 
 cleanup() {
-	if [ -n "$container_id" ]; then
-		docker rm "$container_id" >/dev/null
+	if [ -n "$docker_container_id" ]; then
+		docker rm "$docker_container_id" >/dev/null
 	fi
 	rm -rf "$work_dir"
 }
 trap cleanup EXIT INT TERM
 
 docker build -t "$image" "$script_dir"
-container_id=$(docker create "$image")
-docker export "$container_id" -o "$work_dir/rootfs.tar"
+docker_container_id=$(docker create "$image")
+docker export "$docker_container_id" -o "$work_dir/rootfs.tar"
 entrypoint=$(docker inspect --format '{{json .Config.Entrypoint}}' "$image")
 command=$(docker inspect --format '{{json .Config.Cmd}}' "$image")
 process_args=$(jq -cn --argjson entrypoint "$entrypoint" --argjson command "$command" '$entrypoint + $command')

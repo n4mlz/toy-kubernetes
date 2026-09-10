@@ -7,26 +7,14 @@ import (
 
 	"toy-kubernetes/api"
 	"toy-kubernetes/apiserver"
+	"toy-kubernetes/config"
 )
-
-type Config struct {
-	WorkerCount int
-	PodCIDR     string
-	NodePrefix  int
-}
 
 // TODO: 現在は API server から Node object を直接登録している。
 // node supervisor と kubelet の起動後に、kubelet の自己登録へ置き換える。
-func RegisterWorkers(ctx context.Context, client *apiserver.Client, config Config) error {
-	if config.WorkerCount < 0 {
+func RegisterWorkers(ctx context.Context, client *apiserver.Client, workerCount int) error {
+	if workerCount < 0 {
 		return fmt.Errorf("worker count must not be negative")
-	}
-
-	if config.PodCIDR == "" {
-		config.PodCIDR = DefaultPodCIDR
-	}
-	if config.NodePrefix == 0 {
-		config.NodePrefix = DefaultNodePrefix
 	}
 
 	prefix, err := netip.ParsePrefix(config.PodCIDR)
@@ -37,8 +25,8 @@ func RegisterWorkers(ctx context.Context, client *apiserver.Client, config Confi
 		return fmt.Errorf("node prefix must be between %d and 32", prefix.Bits())
 	}
 
-	for index := 0; index < config.WorkerCount; index++ {
-		podCIDR, err := subnet(prefix, config.NodePrefix, index)
+	for index := 0; index < workerCount; index++ {
+		podCIDR, err := subnet(prefix, config.NodePrefix, index+1)
 		if err != nil {
 			return err
 		}
@@ -46,7 +34,7 @@ func RegisterWorkers(ctx context.Context, client *apiserver.Client, config Confi
 		node := api.Node{
 			TypeMeta: api.TypeMeta{APIVersion: api.APIVersionV1, Kind: "Node"},
 			ObjectMeta: api.ObjectMeta{
-				Name: fmt.Sprintf("worker-%d", index+1),
+				Name: fmt.Sprintf("%s%d", config.WorkerNamePrefix, index+1),
 			},
 			Spec:   api.NodeSpec{PodCIDR: podCIDR.String()},
 			Status: api.NodeStatus{Phase: api.NodeReady},
@@ -58,6 +46,22 @@ func RegisterWorkers(ctx context.Context, client *apiserver.Client, config Confi
 	}
 
 	return nil
+}
+
+func NodeNetwork(index int) (netip.Prefix, netip.Addr, error) {
+	prefix, err := netip.ParsePrefix(config.PodCIDR)
+	if err != nil {
+		return netip.Prefix{}, netip.Addr{}, err
+	}
+	podCIDR, err := subnet(prefix, config.NodePrefix, index)
+	if err != nil {
+		return netip.Prefix{}, netip.Addr{}, err
+	}
+
+	address := podCIDR.Addr().As4()
+	address[3] = config.GatewayHost
+	gateway := netip.AddrFrom4(address)
+	return podCIDR, gateway, nil
 }
 
 func subnet(prefix netip.Prefix, bits, index int) (netip.Prefix, error) {

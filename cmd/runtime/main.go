@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"toy-kubernetes/cni"
+	"toy-kubernetes/config"
 	containerRuntime "toy-kubernetes/cri/runtime"
 )
 
@@ -18,8 +19,8 @@ func main() {
 	rootfs := flag.String("rootfs", "", "container rootfs")
 	readyFD := flag.Int("network-ready-fd", -1, "file descriptor released after CNI setup")
 	networkFD := flag.Int("network-fd", -1, "Pod sandbox network namespace file descriptor")
-	socket := flag.String("socket", containerRuntime.DefaultSocket, "CRI Unix socket")
-	bundleDir := flag.String("bundle-dir", containerRuntime.DefaultBundleDir, "bundle directory")
+	socket := flag.String("socket", "", "CRI Unix socket")
+	bundleDir := flag.String("bundle-dir", config.BundleDir, "bundle directory")
 	bridge := flag.String("bridge", "", "Pod network bridge")
 	podCIDR := flag.String("pod-cidr", "", "Pod network CIDR")
 	gateway := flag.String("gateway", "", "Pod network gateway")
@@ -51,6 +52,9 @@ func main() {
 		signal.Notify(termination, os.Interrupt, syscall.SIGTERM)
 		<-termination
 		return
+	}
+	if *socket == "" {
+		log.Fatal("socket is required")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

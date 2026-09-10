@@ -14,9 +14,8 @@ import (
 	"toy-kubernetes/api"
 	"toy-kubernetes/apiserver"
 	"toy-kubernetes/bootstrap"
+	"toy-kubernetes/config"
 )
-
-const defaultAPIServerURL = "http://127.0.0.1:8080"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -27,20 +26,15 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: toyctl [--server URL] <apply|get|describe|delete|bootstrap>")
+		return errors.New("usage: toyctl <apply|get|describe|delete|bootstrap>")
 	}
 
 	flags := flag.NewFlagSet("toyctl", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	serverURL := flags.String("server", defaultAPIServerURL, "API server URL")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if value := os.Getenv("TOY_API_SERVER"); *serverURL == defaultAPIServerURL && value != "" {
-		*serverURL = value
-	}
-
-	client := apiserver.NewClient(*serverURL)
+	client := apiserver.NewClient(config.APIServerURL)
 	commandArgs := flags.Args()
 	if len(commandArgs) == 0 {
 		return errors.New("command is required")
@@ -275,14 +269,12 @@ func deleteObject(ctx context.Context, client *apiserver.Client, kind, name stri
 func bootstrapWorkers(ctx context.Context, client *apiserver.Client, args []string) error {
 	flags := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	workers := flags.Int("workers", bootstrap.DefaultWorkerCount, "worker count")
-	podCIDR := flags.String("pod-cidr", bootstrap.DefaultPodCIDR, "worker Pod CIDR")
-	nodePrefix := flags.Int("node-prefix", bootstrap.DefaultNodePrefix, "worker Pod CIDR prefix")
+	workers := flags.Int("workers", config.DefaultWorkerCount, "worker count")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
-	if err := bootstrap.RegisterWorkers(ctx, client, bootstrap.Config{WorkerCount: *workers, PodCIDR: *podCIDR, NodePrefix: *nodePrefix}); err != nil {
+	if err := bootstrap.RegisterWorkers(ctx, client, *workers); err != nil {
 		return err
 	}
 	fmt.Printf("%d worker Node objects registered\n", *workers)

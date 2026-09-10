@@ -128,16 +128,16 @@ func (plugin *LinuxCNI) configurePod(ctx context.Context, netnsPath, peer string
 	if err != nil {
 		return err
 	}
-	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "link", "set", peer, "name", "eth0")...); err != nil {
+	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "link", "set", peer, "name", podInterface)...); err != nil {
 		return fmt.Errorf("rename Pod interface: %w", err)
 	}
-	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "link", "set", "lo", "up")...); err != nil {
+	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "link", "set", loopback, "up")...); err != nil {
 		return fmt.Errorf("enable Pod loopback: %w", err)
 	}
-	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "addr", "add", ip.String()+"/"+strconv.Itoa(prefix), "dev", "eth0")...); err != nil {
+	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "addr", "add", ip.String()+"/"+strconv.Itoa(prefix), "dev", podInterface)...); err != nil {
 		return fmt.Errorf("assign Pod IP: %w", err)
 	}
-	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "link", "set", "eth0", "up")...); err != nil {
+	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "link", "set", podInterface, "up")...); err != nil {
 		return fmt.Errorf("enable Pod interface: %w", err)
 	}
 	if err := run(ctx, "nsenter", append(nsenterArgs, "ip", "route", "add", "default", "via", plugin.gateway.String())...); err != nil {
@@ -147,7 +147,10 @@ func (plugin *LinuxCNI) configurePod(ctx context.Context, netnsPath, peer string
 }
 
 func (plugin *LinuxCNI) nextIP() (net.IP, error) {
-	for host := 2; host < 255; host++ {
+	// gateway は host 部分 1 を使うため、Pod には 2 から割り当てる
+	const firstPodHost = 2
+
+	for host := firstPodHost; host < 255; host++ {
 		candidate := append(net.IP(nil), plugin.podCIDR.IP.To4()...)
 		candidate[3] = byte(host)
 		if candidate.Equal(plugin.gateway) {
@@ -186,7 +189,7 @@ func linkNames(podName string) (string, string) {
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(podName))
 	suffix := fmt.Sprintf("%08x", hash.Sum32())[:8]
-	return "cnih" + suffix, "cnip" + suffix
+	return hostVethPrefix + suffix, podVethPrefix + suffix
 }
 
 func run(ctx context.Context, name string, args ...string) error {

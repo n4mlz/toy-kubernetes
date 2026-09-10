@@ -9,7 +9,8 @@ tasks:
   build:
     silent: true
     cmds:
-      - go build -o /tmp/runtime ./cmd/runtime
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/runtime ./cmd/runtime
       - go test -run '^$' ./cri/runtime
 
   test:

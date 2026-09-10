@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"toy-kubernetes/bootstrap"
+	"toy-kubernetes/config"
 	"toy-kubernetes/node"
 )
 
@@ -23,21 +25,23 @@ func main() {
 func run() error {
 	flags := flag.NewFlagSet("node-supervisor", flag.ContinueOnError)
 	nodeName := flags.String("node", "", "node name")
-	runtimePath := flags.String("runtime", "/tmp/runtime", "container runtime path")
-	kubeletPath := flags.String("kubelet", "/tmp/kubelet", "kubelet path")
+	runtimePath := flags.String("runtime", config.RuntimeBinary, "container runtime path")
+	kubeletPath := flags.String("kubelet", config.KubeletBinary, "kubelet path")
 	socketPath := flags.String("socket", "", "runtime socket path")
-	bundleDir := flags.String("bundle-dir", "bundles", "runtime bundle directory")
-	bridge := flags.String("bridge", "", "Pod network bridge")
-	podCIDR := flags.String("pod-cidr", "", "Pod network CIDR")
-	gateway := flags.String("gateway", "", "Pod network gateway")
+	bundleDir := flags.String("bundle-dir", config.BundleDir, "runtime bundle directory")
+	nodeIndex := flags.Int("node-index", -1, "node network index")
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
 	apiServer := flags.String("api-server", "", "API server URL")
 	logDir := flags.String("log-dir", "", "log directory")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if *nodeName == "" || *socketPath == "" || *manifestDir == "" || *logDir == "" {
-		return errors.New("node, socket, manifests and log-dir are required")
+	if *nodeName == "" || *nodeIndex < 0 || *socketPath == "" || *manifestDir == "" || *logDir == "" {
+		return errors.New("node, node-index, socket, manifests and log-dir are required")
+	}
+	podCIDR, gateway, err := bootstrap.NodeNetwork(*nodeIndex)
+	if err != nil {
+		return fmt.Errorf("calculate node network: %w", err)
 	}
 
 	if err := os.MkdirAll(*logDir, 0o755); err != nil {
@@ -54,9 +58,9 @@ func run() error {
 			Args: []string{
 				"-socket", *socketPath,
 				"-bundle-dir", filepath.Clean(*bundleDir),
-				"-bridge", *bridge,
-				"-pod-cidr", *podCIDR,
-				"-gateway", *gateway,
+				"-bridge", config.BridgeName,
+				"-pod-cidr", podCIDR.String(),
+				"-gateway", gateway.String(),
 			},
 			LogPath: filepath.Join(*logDir, "runtime.log"),
 		},

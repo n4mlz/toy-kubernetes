@@ -4,7 +4,8 @@ tasks:
   build:
     silent: true
     cmds:
-      - go build -o /tmp/kubelet ./cmd/kubelet
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/kubelet ./cmd/kubelet
 
   test:
     silent: true

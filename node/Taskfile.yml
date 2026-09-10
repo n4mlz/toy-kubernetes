@@ -4,7 +4,8 @@ tasks:
   build:
     silent: true
     cmds:
-      - go build -o /tmp/node-supervisor ./cmd/node-supervisor
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/node-supervisor ./cmd/node-supervisor
 
   test:
     silent: true
