@@ -16,6 +16,7 @@ kube_proxy_path=$bin_dir/kube-proxy
 supervisor_path=$bin_dir/node-supervisor
 root_dir=$project_root/.toy/nodes
 bundle_dir=$project_root/bundles
+control_plane_manifest_dir=$project_root/node/manifests/control-plane
 underlay_bridge=toy-underlay0
 underlay_interface=underlay0
 
@@ -88,6 +89,27 @@ create_underlay() {
 	ip link set "$underlay_bridge" up
 }
 
+prepare_control_plane_manifests() {
+	control_plane_dir=$root_dir/$control_plane_name/manifests
+	mkdir -p "$control_plane_dir"
+
+	if [ ! -d "$control_plane_manifest_dir" ]; then
+		echo "[node] control plane manifest directory not found: $control_plane_manifest_dir" >&2
+		return 1
+	fi
+
+	manifest_found=false
+	for manifest in "$control_plane_manifest_dir"/*.yaml "$control_plane_manifest_dir"/*.yml "$control_plane_manifest_dir"/*.json; do
+		[ -f "$manifest" ] || continue
+		cp "$manifest" "$control_plane_dir/"
+		manifest_found=true
+	done
+	if [ "$manifest_found" = false ]; then
+		echo "[node] no control plane manifest found in $control_plane_manifest_dir" >&2
+		return 1
+	fi
+}
+
 start_node() {
 	node_name=$1
 	node_index=$2
@@ -142,8 +164,8 @@ trap cleanup EXIT INT TERM
 
 node_count=$((workers + 1))
 create_underlay
+prepare_control_plane_manifests
 
-# TODO: 起動前に control plane bootstrap が static Pod の manifest をこの directory に配置する
 start_node "$control_plane_name" 0 "$node_count"
 for index in $(seq 1 "$workers"); do
 	start_node "$worker_name_prefix$index" "$index" "$node_count"

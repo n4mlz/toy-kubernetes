@@ -72,7 +72,7 @@ func run() error {
 		{
 			Name:    "kubelet",
 			Path:    *kubeletPath,
-			Args:    []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer},
+			Args:    []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer, "-pod-cidr", podCIDR.String()},
 			LogPath: filepath.Join(*logDir, "kubelet.log"),
 		},
 	}

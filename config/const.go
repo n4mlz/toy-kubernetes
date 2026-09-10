@@ -18,9 +18,10 @@ const (
 	UnderlayCIDR       = "10.200.0.0/24"
 	FirstNodeHost      = 2
 
-	BinaryDir   = ".toy/bin"
-	NodeDataDir = ".toy/nodes"
-	BundleDir   = "bundles"
+	BinaryDir               = ".toy/bin"
+	NodeDataDir             = ".toy/nodes"
+	BundleDir               = "bundles"
+	ControlPlaneManifestDir = "node/manifests/control-plane"
 
 	RuntimeBinary        = BinaryDir + "/runtime"
 	KubeletBinary        = BinaryDir + "/kubelet"

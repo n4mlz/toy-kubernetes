@@ -26,6 +26,7 @@ func run() error {
 	flags := flag.NewFlagSet("kubelet", flag.ContinueOnError)
 	nodeName := flags.String("node", "", "node name")
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
+	podCIDR := flags.String("pod-cidr", "", "Pod CIDR assigned to this Node")
 	socket := flags.String("socket", "", "CRI socket path")
 	apiServer := flags.String("api-server", "", "API server URL")
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -40,7 +41,7 @@ func run() error {
 		apiClient = apiserver.NewClient(*apiServer)
 	}
 
-	worker := kubelet.NewWithManifestDir(apiClient, cri.NewClient(*socket), *nodeName, *manifestDir)
+	worker := kubelet.NewWithManifestDirAndPodCIDR(apiClient, cri.NewClient(*socket), *nodeName, *manifestDir, *podCIDR)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

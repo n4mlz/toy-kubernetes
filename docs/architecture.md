@@ -222,6 +222,8 @@ task run
 
 `node/scripts/run.sh` は namespace、node directory、supervisor の起動と、終了時の namespace cleanup を担当する。`cmd/node-supervisor/main.go` は supervisor executable の入口として、node 内で起動する unit を組み立てる。`node/supervisor.go` は unit の process group、ログ、終了監視、signal forwarding を管理する。CRI runtime と kubelet は同じ supervisor が管理する。
 
+control plane の static Pod manifest は `config/const.go` の `ControlPlaneManifestDir` に対応する `node/manifests/control-plane` から control-plane node の manifest directory へ run script が配置する。manifest がない場合、run script は起動を続けない。
+
 `node/scripts/run.sh` は worker 数を受け取り、実行ファイルと node data を `.toy/` に置く。Pod network、bridge、CIDR、gateway は `config` と `bootstrap` の固定値から `node-supervisor` が決定する。デフォルト値は 1 control plane と 2 worker の動作確認用である。
 
 ### Kubernetes 本体の起動
@@ -232,7 +234,7 @@ task run
 2. control plane の kubelet が local static Pod manifest を読み込む
 3. kubelet が CRI runtime に etcd、kube-apiserver、kube-scheduler、kube-controller-manager の static Pod を起動させる
 4. API server の readiness を待つ
-5. worker の kubelet と CRI runtime を起動し、Node object を登録する
+5. worker の kubelet と CRI runtime を起動し、kubelet が Node object を自己登録する
 6. API server 起動後に worker の node supervisor が kube-proxy を起動する。DaemonSet は未実装のため、これは本家との差分である
 7. kubelet が API state と CRI runtime state を reconcile する
 

@@ -13,6 +13,7 @@ type Kubelet struct {
 	runtime     cri.CRI
 	nodeName    string
 	manifestDir string
+	podCIDR     string
 }
 
 var _ api.Reconciler = (*Kubelet)(nil)
@@ -24,6 +25,12 @@ func New(apiClient *apiserver.Client, runtime cri.CRI, nodeName string) *Kubelet
 func NewWithManifestDir(apiClient *apiserver.Client, runtime cri.CRI, nodeName, manifestDir string) *Kubelet {
 	kubelet := New(apiClient, runtime, nodeName)
 	kubelet.manifestDir = manifestDir
+	return kubelet
+}
+
+func NewWithManifestDirAndPodCIDR(apiClient *apiserver.Client, runtime cri.CRI, nodeName, manifestDir, podCIDR string) *Kubelet {
+	kubelet := NewWithManifestDir(apiClient, runtime, nodeName, manifestDir)
+	kubelet.podCIDR = podCIDR
 	return kubelet
 }
 
@@ -98,7 +105,33 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 
 // Pod、static manifest、CRI の変更を契機に、担当 Pod の desired state を再確認する
 func (kubelet *Kubelet) Run(ctx context.Context) error {
+	if err := kubelet.registerNode(ctx); err != nil {
+		return err
+	}
 	return api.Run(ctx, kubelet, kubelet.watch)
+}
+
+func (kubelet *Kubelet) registerNode(ctx context.Context) error {
+	if kubelet.apiClient == nil || kubelet.podCIDR == "" {
+		return nil
+	}
+
+	// kubelet 起動時に Node を登録し、scheduler が利用できる状態を作る
+	node := api.Node{
+		TypeMeta:   api.TypeMeta{APIVersion: api.APIVersionV1, Kind: "Node"},
+		ObjectMeta: api.ObjectMeta{Name: kubelet.nodeName},
+		Spec:       api.NodeSpec{PodCIDR: kubelet.podCIDR},
+		Status:     api.NodeStatus{Phase: api.NodeReady},
+	}
+	if current, err := kubelet.apiClient.Nodes().Get(ctx, kubelet.nodeName); err == nil {
+		node.ResourceVersion = current.ResourceVersion
+		_, err := kubelet.apiClient.Nodes().Update(ctx, kubelet.nodeName, node)
+		return err
+	}
+	if _, err := kubelet.apiClient.Nodes().Create(ctx, node); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (kubelet *Kubelet) watch(ctx context.Context) (<-chan error, error) {

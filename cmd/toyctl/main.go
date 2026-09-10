@@ -13,7 +13,6 @@ import (
 
 	"toy-kubernetes/api"
 	"toy-kubernetes/apiserver"
-	"toy-kubernetes/bootstrap"
 	"toy-kubernetes/config"
 )
 
@@ -26,7 +25,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: toyctl <apply|get|describe|delete|bootstrap>")
+		return errors.New("usage: toyctl <apply|get|describe|delete>")
 	}
 
 	flags := flag.NewFlagSet("toyctl", flag.ContinueOnError)
@@ -49,10 +48,6 @@ func run(args []string) error {
 		return describe(context.Background(), client, commandArgs[1:])
 	case "delete":
 		return deleteResource(context.Background(), client, commandArgs[1:])
-	case "bootstrap":
-		// TODO: 現在は toyctl の公開コマンドとして bootstrap を提供している。
-		// 仮想 node の起動処理から呼び出す内部処理へ移し、公開 CLI から削除する。
-		return bootstrapWorkers(context.Background(), client, commandArgs[1:])
 	default:
 		return fmt.Errorf("unknown command %q", commandArgs[0])
 	}
@@ -264,21 +259,6 @@ func deleteObject(ctx context.Context, client *apiserver.Client, kind, name stri
 	default:
 		return fmt.Errorf("unsupported kind %q", kind)
 	}
-}
-
-func bootstrapWorkers(ctx context.Context, client *apiserver.Client, args []string) error {
-	flags := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	workers := flags.Int("workers", config.DefaultWorkerCount, "worker count")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-
-	if err := bootstrap.RegisterWorkers(ctx, client, *workers); err != nil {
-		return err
-	}
-	fmt.Printf("%d worker Node objects registered\n", *workers)
-	return nil
 }
 
 func splitResource(value string) (string, string, error) {
