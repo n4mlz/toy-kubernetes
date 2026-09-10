@@ -76,30 +76,56 @@ func ReconcileStaticPods(ctx context.Context, runtime cri.CRI, pods []api.Pod) e
 	if err != nil {
 		return err
 	}
+	sandboxes, err := runtime.ListSandboxes(ctx)
+	if err != nil {
+		return err
+	}
 
-	desired := make(map[string]api.Pod, len(pods))
+	desired := make(map[string]struct{}, len(pods))
+
 	for _, pod := range pods {
-		desired[pod.Name] = pod
-		if container, ok := containerForPod(containers, pod.Name); !ok || container.State != cri.Running {
-			if _, err := runtime.Run(ctx, pod); err != nil {
+		desired[pod.Name] = struct{}{}
+		sandbox, sandboxExists := staticSandboxForPod(sandboxes, pod.Name)
+		if !sandboxExists {
+			sandbox, err = runtime.RunPodSandbox(ctx, pod, cri.StaticPod)
+			if err != nil {
+				return fmt.Errorf("start static Pod sandbox %s: %w", pod.Name, err)
+			}
+			sandboxes = append(sandboxes, sandbox)
+		}
+		if container, ok := containerForSandbox(containers, sandbox.ID); !ok || container.State != cri.Running {
+			if _, err := runtime.RunInSandbox(ctx, pod, sandbox.ID); err != nil {
 				return fmt.Errorf("start static Pod %s: %w", pod.Name, err)
 			}
 		}
 	}
 
-	for _, container := range containers {
-		if _, ok := desired[container.PodName]; !ok && container.State == cri.Running {
-			if err := runtime.Stop(ctx, container.PodName); err != nil {
-				return fmt.Errorf("stop removed static Pod %s: %w", container.PodName, err)
-			}
+	for _, sandbox := range sandboxes {
+		if sandbox.Source != cri.StaticPod || sandbox.State != cri.Running {
+			continue
+		}
+		if _, ok := desired[sandbox.PodName]; ok {
+			continue
+		}
+		if err := runtime.StopPodSandbox(ctx, sandbox.ID); err != nil {
+			return fmt.Errorf("stop removed static Pod %s: %w", sandbox.PodName, err)
 		}
 	}
 	return nil
 }
 
-func containerForPod(containers []cri.Container, podName string) (cri.Container, bool) {
+func staticSandboxForPod(sandboxes []cri.Sandbox, podName string) (cri.Sandbox, bool) {
+	for _, sandbox := range sandboxes {
+		if sandbox.PodName == podName && sandbox.Source == cri.StaticPod {
+			return sandbox, true
+		}
+	}
+	return cri.Sandbox{}, false
+}
+
+func containerForSandbox(containers []cri.Container, sandboxID string) (cri.Container, bool) {
 	for _, container := range containers {
-		if container.PodName == podName {
+		if container.SandboxID == sandboxID {
 			return container, true
 		}
 	}

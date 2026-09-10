@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"toy-kubernetes/cni"
 	"toy-kubernetes/cri"
 
 	"golang.org/x/sys/unix"
@@ -23,30 +24,47 @@ import (
 type Runtime struct {
 	socketPath string
 	bundleDir  string
+	network    cni.CNI
 
 	mu         sync.Mutex
 	containers map[string]*managedContainer
+	sandboxes  map[string]*managedSandbox
+}
+
+type managedSandbox struct {
+	sandbox   cri.Sandbox
+	process   *os.Process
+	done      chan struct{}
+	netnsPath string
 }
 
 type managedContainer struct {
 	container cri.Container
 	process   *os.Process
 	done      chan struct{}
+	netnsPath string
+	sandboxID string
 }
 
 type request struct {
-	Operation string `json:"op"`
-	Pod       string `json:"pod,omitempty"`
-	Image     string `json:"image,omitempty"`
+	Operation string            `json:"op"`
+	Pod       string            `json:"pod,omitempty"`
+	Image     string            `json:"image,omitempty"`
+	SandboxID string            `json:"sandboxID,omitempty"`
+	Source    cri.SandboxSource `json:"source,omitempty"`
 }
 
 type response struct {
-	OK         bool            `json:"ok"`
-	Error      string          `json:"error,omitempty"`
-	ID         string          `json:"id,omitempty"`
-	Pod        string          `json:"pod,omitempty"`
-	State      cri.State       `json:"state,omitempty"`
-	Containers []cri.Container `json:"containers,omitempty"`
+	OK         bool              `json:"ok"`
+	Error      string            `json:"error,omitempty"`
+	ID         string            `json:"id,omitempty"`
+	Pod        string            `json:"pod,omitempty"`
+	State      cri.State         `json:"state,omitempty"`
+	SandboxID  string            `json:"sandboxID,omitempty"`
+	Source     cri.SandboxSource `json:"source,omitempty"`
+	IP         string            `json:"ip,omitempty"`
+	Containers []cri.Container   `json:"containers,omitempty"`
+	Sandboxes  []cri.Sandbox     `json:"sandboxes,omitempty"`
 }
 
 type bundleConfig struct {
@@ -67,7 +85,14 @@ func NewRuntime(socketPath, bundleDir string) *Runtime {
 		socketPath: socketPath,
 		bundleDir:  bundleDir,
 		containers: make(map[string]*managedContainer),
+		sandboxes:  make(map[string]*managedSandbox),
 	}
+}
+
+func NewRuntimeWithNetwork(socketPath, bundleDir string, network cni.CNI) *Runtime {
+	runtime := NewRuntime(socketPath, bundleDir)
+	runtime.network = network
+	return runtime
 }
 
 // Unix socket で request を受け付け、container lifecycle を管理する
@@ -128,12 +153,25 @@ func (runtime *Runtime) handleRequest(input request) (response, error) {
 	switch input.Operation {
 	case "list":
 		return runtime.list(), nil
-	case "run":
-		container, err := runtime.run(input.Pod, input.Image)
+	case "list-sandboxes":
+		return runtime.listSandboxes(), nil
+	case "run-pod-sandbox":
+		sandbox, err := runtime.runPodSandbox(input.Pod, input.Source)
 		if err != nil {
 			return response{}, err
 		}
-		return response{ID: container.ID, Pod: container.PodName, State: container.State}, nil
+		return response{SandboxID: sandbox.ID, Pod: sandbox.PodName, Source: sandbox.Source, State: sandbox.State, IP: sandbox.IP}, nil
+	case "run-in-sandbox":
+		container, err := runtime.runInSandbox(input.Pod, input.Image, input.SandboxID)
+		if err != nil {
+			return response{}, err
+		}
+		return response{ID: container.ID, Pod: container.PodName, State: container.State, SandboxID: container.SandboxID}, nil
+	case "stop-pod-sandbox":
+		if err := runtime.stopPodSandbox(input.SandboxID); err != nil {
+			return response{}, err
+		}
+		return response{SandboxID: input.SandboxID, State: cri.Stopped}, nil
 	case "stop":
 		if err := runtime.stop(input.Pod); err != nil {
 			return response{}, err
@@ -161,76 +199,138 @@ func (runtime *Runtime) list() response {
 	return response{Containers: containers}
 }
 
-func (runtime *Runtime) run(podName, image string) (cri.Container, error) {
-	if image != "nginx" {
-		return cri.Container{}, errors.New("only the nginx image is supported")
-	}
-
+func (runtime *Runtime) listSandboxes() response {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 
-	if managed, ok := runtime.containers[podName]; ok && managed.container.State == cri.Running {
-		return managed.container, nil
+	sandboxes := make([]cri.Sandbox, 0, len(runtime.sandboxes))
+	for _, managed := range runtime.sandboxes {
+		sandboxes = append(sandboxes, managed.sandbox)
 	}
+	return response{Sandboxes: sandboxes}
+}
 
+func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) (cri.Sandbox, error) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	for _, sandbox := range runtime.sandboxes {
+		if sandbox.sandbox.PodName == podName && sandbox.sandbox.Source == source && sandbox.sandbox.State == cri.Running {
+			return sandbox.sandbox, nil
+		}
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return cri.Sandbox{}, err
+	}
+	command := exec.Command(os.Args[0], "--sandbox-child", "--network-ready-fd", "3")
+	command.ExtraFiles = []*os.File{reader}
+	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWNET}
+	if err := command.Start(); err != nil {
+		return cri.Sandbox{}, err
+	}
+	_ = reader.Close()
+	netnsPath := fmt.Sprintf("/proc/%d/ns/net", command.Process.Pid)
+	result := cni.Result{}
+	if runtime.network != nil {
+		result, err = runtime.network.Add(context.Background(), podName, netnsPath)
+		if err != nil {
+			_ = command.Process.Kill()
+			return cri.Sandbox{}, err
+		}
+	}
+	if _, err := writer.Write([]byte{1}); err != nil {
+		_ = command.Process.Kill()
+		return cri.Sandbox{}, err
+	}
+	_ = writer.Close()
+	id := fmt.Sprintf("sandbox-%d", command.Process.Pid)
+	sandbox := &managedSandbox{sandbox: cri.Sandbox{ID: id, PodName: podName, Source: source, IP: result.IP.String(), State: cri.Running}, process: command.Process, done: make(chan struct{}), netnsPath: netnsPath}
+	runtime.sandboxes[id] = sandbox
+	go func() { _ = command.Wait(); close(sandbox.done) }()
+	return sandbox.sandbox, nil
+}
+
+func (runtime *Runtime) runInSandbox(podName, image, sandboxID string) (cri.Container, error) {
+	runtime.mu.Lock()
+	sandbox, ok := runtime.sandboxes[sandboxID]
+	runtime.mu.Unlock()
+	if !ok || sandbox.sandbox.State != cri.Running {
+		return cri.Container{}, errors.New("Pod sandbox is not running")
+	}
+	if image != "nginx" {
+		return cri.Container{}, errors.New("only the nginx image is supported")
+	}
 	config, err := readBundleConfig(runtime.bundleDir)
 	if err != nil {
 		return cri.Container{}, err
 	}
-	if config.Root.Path == "" {
-		return cri.Container{}, errors.New("bundle config has no root path")
-	}
-
 	rootfs, err := filepath.Abs(filepath.Join(runtime.bundleDir, config.Root.Path))
-	if err != nil {
-		return cri.Container{}, fmt.Errorf("resolve bundle rootfs: %w", err)
-	}
-	if _, err := os.Stat(rootfs); err != nil {
-		return cri.Container{}, fmt.Errorf("bundle rootfs is unavailable: %w", err)
-	}
-
-	process, err := startContainerProcess(rootfs, config.Process.Args)
 	if err != nil {
 		return cri.Container{}, err
 	}
-
-	container := cri.Container{
-		ID:      fmt.Sprintf("pid-%d", process.Process.Pid),
-		PodName: podName,
-		State:   cri.Running,
+	started, err := startContainerInSandbox(rootfs, config.Process.Args, sandbox.process.Pid)
+	if err != nil {
+		return cri.Container{}, err
 	}
-	managed := &managedContainer{
-		container: container,
-		process:   process.Process,
-		done:      make(chan struct{}),
-	}
+	container := cri.Container{ID: fmt.Sprintf("pid-%d", started.Process.Pid), PodName: podName, SandboxID: sandboxID, State: cri.Running}
+	managed := &managedContainer{container: container, process: started.Process, done: make(chan struct{}), sandboxID: sandboxID}
+	runtime.mu.Lock()
 	runtime.containers[podName] = managed
-
-	go runtime.waitForContainer(podName, process, managed.done)
+	runtime.mu.Unlock()
+	go runtime.waitForContainer(podName, started, managed.done)
 	return container, nil
 }
 
-func startContainerProcess(rootfs string, processArgs []string) (*exec.Cmd, error) {
+func (runtime *Runtime) stopPodSandbox(id string) error {
+	runtime.mu.Lock()
+	sandbox, ok := runtime.sandboxes[id]
+	runtime.mu.Unlock()
+	if !ok {
+		return cri.ErrNotFound
+	}
+	for name, container := range runtime.containers {
+		if container.sandboxID == id {
+			_ = runtime.stop(name)
+		}
+	}
+	if runtime.network != nil {
+		_ = runtime.network.Del(context.Background(), sandbox.sandbox.PodName, sandbox.netnsPath)
+	}
+	_ = sandbox.process.Kill()
+	delete(runtime.sandboxes, id)
+	return nil
+}
+
+func startContainerInSandbox(rootfs string, processArgs []string, sandboxPID int) (*exec.Cmd, error) {
 	executable, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("find CRI runtime executable: %w", err)
+		return nil, err
 	}
-
-	processArgs = append([]string{}, processArgs...)
-	if len(processArgs) == 0 {
-		return nil, errors.New("bundle has no process command")
+	network, err := os.Open(fmt.Sprintf("/proc/%d/ns/net", sandboxPID))
+	if err != nil {
+		return nil, fmt.Errorf("open sandbox network namespace: %w", err)
 	}
-	commandArgs := append([]string{"--container-child", "--rootfs", rootfs, "--"}, processArgs...)
-	command := exec.Command(executable, commandArgs...)
-	command.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWNET,
+	defer network.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return nil, err
 	}
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-
+	args := append([]string{"--container-child", "--rootfs", rootfs, "--network-fd", "3", "--network-ready-fd", "4", "--"}, processArgs...)
+	command := exec.Command(executable, args...)
+	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS}
+	command.Stdout, command.Stderr = os.Stdout, os.Stderr
+	command.ExtraFiles = []*os.File{network, reader}
 	if err := command.Start(); err != nil {
-		return nil, fmt.Errorf("start container in namespaces: %w", err)
+		_ = reader.Close()
+		_ = writer.Close()
+		return nil, err
 	}
+	_ = reader.Close()
+	if _, err := writer.Write([]byte{1}); err != nil {
+		_ = command.Process.Kill()
+		return nil, err
+	}
+	_ = writer.Close()
 	return command, nil
 }
 
@@ -249,7 +349,12 @@ func readBundleConfig(bundleDir string) (bundleConfig, error) {
 
 func (runtime *Runtime) waitForContainer(podName string, command *exec.Cmd, done chan struct{}) {
 	_ = command.Wait()
-
+	runtime.mu.Lock()
+	managed, ok := runtime.containers[podName]
+	runtime.mu.Unlock()
+	if ok && runtime.network != nil {
+		_ = runtime.network.Del(context.Background(), podName, managed.netnsPath)
+	}
 	runtime.mu.Lock()
 	if managed, ok := runtime.containers[podName]; ok && managed.done == done {
 		managed.container.State = cri.Stopped
@@ -332,6 +437,26 @@ func RunContainerChild(rootfs string, processArgs []string) error {
 
 	processArgs[0] = commandPath
 	return unix.Exec(commandPath, processArgs, containerEnvironment())
+}
+
+func WaitForNetwork(fd int) error {
+	file := os.NewFile(uintptr(fd), "network-ready")
+	if file == nil {
+		return errors.New("network readiness file descriptor is invalid")
+	}
+	defer file.Close()
+	buffer := []byte{0}
+	if _, err := file.Read(buffer); err != nil {
+		return fmt.Errorf("wait for CNI setup: %w", err)
+	}
+	return nil
+}
+
+func JoinNetworkNamespaceFD(fd int) error {
+	if err := unix.Setns(fd, unix.CLONE_NEWNET); err != nil {
+		return fmt.Errorf("join Pod network namespace: %w", err)
+	}
+	return nil
 }
 
 func containerEnvironment() []string {

@@ -27,6 +27,9 @@ func run() error {
 	kubeletPath := flags.String("kubelet", "/tmp/kubelet", "kubelet path")
 	socketPath := flags.String("socket", "", "runtime socket path")
 	bundleDir := flags.String("bundle-dir", "bundles", "runtime bundle directory")
+	bridge := flags.String("bridge", "", "Pod network bridge")
+	podCIDR := flags.String("pod-cidr", "", "Pod network CIDR")
+	gateway := flags.String("gateway", "", "Pod network gateway")
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
 	apiServer := flags.String("api-server", "", "API server URL")
 	logDir := flags.String("log-dir", "", "log directory")
@@ -46,9 +49,15 @@ func run() error {
 
 	units := []node.Unit{
 		{
-			Name:    "runtime",
-			Path:    *runtimePath,
-			Args:    []string{"-socket", *socketPath, "-bundle-dir", filepath.Clean(*bundleDir)},
+			Name: "runtime",
+			Path: *runtimePath,
+			Args: []string{
+				"-socket", *socketPath,
+				"-bundle-dir", filepath.Clean(*bundleDir),
+				"-bridge", *bridge,
+				"-pod-cidr", *podCIDR,
+				"-gateway", *gateway,
+			},
 			LogPath: filepath.Join(*logDir, "runtime.log"),
 		},
 		{

@@ -4,7 +4,7 @@
 
 このプロジェクトは Kubernetes の完全互換実装ではない。宣言的な共有状態を API server に保存し、複数の component がそれぞれの責務を reconcile する流れを、実際に Pod と Service が動くところまで確認するための実装である。
 
-対象環境は Linux の devcontainer 内とし、rootless で動作させる。control plane は 1 固定、worker 数は起動時に指定できる。動作確認のデフォルトは 1 control plane と 2 worker である。
+対象環境は Linux の devcontainer 内とし、devcontainer 内の root 権限で動作させる。control plane は 1 固定、worker 数は起動時に指定できる。動作確認のデフォルトは 1 control plane と 2 worker である。
 
 control plane の HA、etcd の複数 node 化、leader election は今回の対象外である。worker 数は 1 以上とし、worker の増減に合わせて namespace、CIDR、route を生成する。
 
@@ -70,13 +70,13 @@ nodeName が空の Pod と Ready な Node を観測し、Pod を worker に bind
 
 Kubelet は worker namespace に常駐する node agent であり、runtime や CNI の内部処理を直接担当しない。
 
-control plane 用 kubelet は API server のリソースを待たず、node の local manifest directory を desired state として扱う。manifest の追加・更新・削除を検出し、static Pod を CRI runtime に起動・停止させる。API server URL が設定されている場合は、static Pod に対応する mirror Pod も API server に登録する。mirror Pod は API 上の表示であり、local manifest が source of truth である。
+control plane 用 kubelet は API server のリソースを待たず、node の local manifest directory を desired state として扱う。manifest の追加・更新・削除を検出し、static Pod を CRI runtime に起動・停止させる。CRI の PodSandbox には `staticPod` または `workload` の source を付け、manifest から消えた static Pod の sandbox だけを停止する。API server URL が設定されている場合は、static Pod に対応する mirror Pod も API server に登録する。mirror Pod は API 上の表示であり、local manifest が source of truth である。
 
 ### CRI runtime と CNI
 
-CRI runtime は kubelet からの簡易 CRI protocol を受け、OCI bundle の `config.json` にある process.args に従って container lifecycle を実行する。CRI runtime は rootful に動作し、コンテナ process の rootfs、PID、mount、UTS、network namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri/runtime とする。
+CRI runtime は kubelet からの簡易 CRI protocol を受け、OCI bundle の `config.json` にある process.args に従って container lifecycle を実行する。`RunPodSandbox` で Pod の namespace とネットワークを用意し、`RunInSandbox` でその namespace に container process を参加させる。これは本家 CRI の `RunPodSandbox`、`CreateContainer`、`StartContainer` を、ハンズオン向けに `RunInSandbox` へまとめた形である。sandbox の待機 process は pause container 相当だが、専用 image は使用しない。CRI runtime は rootful に動作し、コンテナ process の rootfs、PID、mount、UTS、network namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri/runtime とする。
 
-CNI は Pod network namespace と worker の bridge を veth pair で接続し、Pod IP と route を設定する。CNI は network resource を作る imperative な effector である。
+CNI は Pod network namespace と worker の bridge を veth pair で接続し、Pod IP と route を設定する。CRI runtime が sandbox 作成時に ADD、sandbox 停止時に DEL を呼び出す。CNI は network resource を作る imperative な effector である。
 
 ### kube-proxy
 
@@ -110,6 +110,21 @@ kube-proxy updates Service forwarding
         |
         v
 client -> Service ClusterIP -> nginx Pod
+~~~
+
+Pod runtime の lifecycle は次の通りである。
+
+~~~text
+Kubelet
+  -> RunPodSandbox
+       -> sandbox namespace を作る
+       -> CNI ADD
+  -> RunInSandbox
+       -> container process を sandbox namespace に参加させる
+  -> StopPodSandbox
+       -> container process を停止
+       -> CNI DEL
+       -> sandbox を停止
 ~~~
 
 同じ状態遷移は Pod の削除や process の終了にも適用する。controller と kubelet が差分を再検出し、desired state に戻す。
@@ -197,7 +212,9 @@ task run
                  └─ kubelet
 ~~~
 
-`node/scripts/run.sh` は namespace、node directory、supervisor の起動と、終了時の namespace cleanup を担当する。`cmd/node-supervisor/main.go` は supervisor executable の入口として、node 内で起動する unit を組み立てる。`node/supervisor.go` は unit の process group、ログ、終了監視、signal forwarding を管理する。最終的には CRI runtime と kubelet を同じ supervisor が管理する。現在の実装では CRI runtime だけを起動し、kubelet は後続の実装で追加する。
+`node/scripts/run.sh` は namespace、node directory、supervisor の起動と、終了時の namespace cleanup を担当する。`cmd/node-supervisor/main.go` は supervisor executable の入口として、node 内で起動する unit を組み立てる。`node/supervisor.go` は unit の process group、ログ、終了監視、signal forwarding を管理する。CRI runtime と kubelet は同じ supervisor が管理する。
+
+`node/scripts/run.sh` の Pod network prefix、network mask、gateway host、bridge 名、各 executable の path は toy cluster の既定値として script 冒頭にまとめて定義する。worker 数は起動時に変更でき、node root は `TOY_NODE_ROOT` で実行環境に合わせて変更できる。デフォルト値は 1 control plane と 2 worker の動作確認用である。
 
 ### Kubernetes 本体の起動
 

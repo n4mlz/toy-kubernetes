@@ -27,7 +27,7 @@ func TestLoadStaticPodsReadsManifestFilesInOrder(t *testing.T) {
 	}
 }
 
-func TestReconcileStaticPodsStartsMissingAndStopsRemovedPods(t *testing.T) {
+func TestReconcileStaticPodsStartsMissingWithoutStoppingNormalContainers(t *testing.T) {
 	runtime := &staticRuntime{containers: []cri.Container{{PodName: "removed", State: cri.Running}}}
 	pods := []api.Pod{{ObjectMeta: api.ObjectMeta{Name: "api"}, Spec: api.PodSpec{Containers: []api.Container{{Image: "nginx"}}}}}
 
@@ -37,8 +37,26 @@ func TestReconcileStaticPodsStartsMissingAndStopsRemovedPods(t *testing.T) {
 	if len(runtime.started) != 1 || runtime.started[0] != "api" {
 		t.Fatalf("missing static Pod should be started: %#v", runtime.started)
 	}
-	if len(runtime.stopped) != 1 || runtime.stopped[0] != "removed" {
-		t.Fatalf("removed static Pod should be stopped: %#v", runtime.stopped)
+	if len(runtime.stopped) != 0 {
+		t.Fatalf("normal containers should not be stopped by static Pod reconcile: %#v", runtime.stopped)
+	}
+}
+
+func TestReconcileStaticPodsStopsOnlyRemovedStaticPods(t *testing.T) {
+	runtime := &staticRuntime{
+		sandboxes: []cri.Sandbox{
+			{ID: "static-removed", PodName: "removed-static", Source: cri.StaticPod, State: cri.Running},
+			{ID: "workload", PodName: "removed-workload", Source: cri.Workload, State: cri.Running},
+			{ID: "static-kept", PodName: "kept-static", Source: cri.StaticPod, State: cri.Running},
+		},
+	}
+	pods := []api.Pod{{ObjectMeta: api.ObjectMeta{Name: "kept-static"}, Spec: api.PodSpec{Containers: []api.Container{{Image: "nginx"}}}}}
+
+	if err := ReconcileStaticPods(context.Background(), runtime, pods); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.stoppedSandboxes) != 1 || runtime.stoppedSandboxes[0] != "static-removed" {
+		t.Fatalf("only the removed static Pod should be stopped: %#v", runtime.stoppedSandboxes)
 	}
 }
 
@@ -51,18 +69,35 @@ func writeManifest(t *testing.T, directory, filename, name string) {
 }
 
 type staticRuntime struct {
-	containers []cri.Container
-	started    []string
-	stopped    []string
+	containers       []cri.Container
+	sandboxes        []cri.Sandbox
+	started          []string
+	stopped          []string
+	stoppedSandboxes []string
+}
+
+func (runtime *staticRuntime) ListSandboxes(context.Context) ([]cri.Sandbox, error) {
+	return runtime.sandboxes, nil
+}
+
+func (runtime *staticRuntime) RunPodSandbox(_ context.Context, pod api.Pod, source cri.SandboxSource) (cri.Sandbox, error) {
+	sandbox := cri.Sandbox{ID: "sandbox-static-" + pod.Name, PodName: pod.Name, Source: source, State: cri.Running}
+	runtime.sandboxes = append(runtime.sandboxes, sandbox)
+	return sandbox, nil
+}
+
+func (runtime *staticRuntime) RunInSandbox(_ context.Context, pod api.Pod, sandboxID string) (cri.Container, error) {
+	runtime.started = append(runtime.started, pod.Name)
+	return cri.Container{PodName: pod.Name, SandboxID: sandboxID, State: cri.Running}, nil
+}
+
+func (runtime *staticRuntime) StopPodSandbox(_ context.Context, sandboxID string) error {
+	runtime.stoppedSandboxes = append(runtime.stoppedSandboxes, sandboxID)
+	return nil
 }
 
 func (runtime *staticRuntime) List(context.Context) ([]cri.Container, error) {
 	return runtime.containers, nil
-}
-
-func (runtime *staticRuntime) Run(_ context.Context, pod api.Pod) (cri.Container, error) {
-	runtime.started = append(runtime.started, pod.Name)
-	return cri.Container{PodName: pod.Name, State: cri.Running}, nil
 }
 
 func (runtime *staticRuntime) Stop(_ context.Context, podName string) error {

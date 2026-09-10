@@ -2,7 +2,19 @@
 
 set -eu
 
-workers=2
+default_workers=2
+pod_network_prefix=10.244
+pod_network_mask=24
+pod_gateway_host=1
+bridge=cni0
+runtime_path=/tmp/runtime
+kubelet_path=/tmp/kubelet
+supervisor_path=/tmp/node-supervisor
+
+workers=$default_workers
+root_dir=${TOY_NODE_ROOT:-/tmp/toy-kubernetes-nodes}
+bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)/bundles
+
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 	--workers)
@@ -27,12 +39,10 @@ if [ "$workers" -lt 1 ]; then
 fi
 
 command -v ip >/dev/null 2>&1 || { echo '[node] ip failed' >&2; exit 1; }
-test -x /tmp/node-supervisor || { echo '[node] node-supervisor is not built' >&2; exit 1; }
-test -x /tmp/runtime || { echo '[node] runtime is not built' >&2; exit 1; }
-test -x /tmp/kubelet || { echo '[node] kubelet is not built' >&2; exit 1; }
+test -x "$supervisor_path" || { echo '[node] node-supervisor is not built' >&2; exit 1; }
+test -x "$runtime_path" || { echo '[node] runtime is not built' >&2; exit 1; }
+test -x "$kubelet_path" || { echo '[node] kubelet is not built' >&2; exit 1; }
 
-root_dir=${TOY_NODE_ROOT:-/tmp/toy-kubernetes-nodes}
-bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)/bundles
 mkdir -p "$root_dir"
 supervisor_pids=
 node_names=
@@ -67,12 +77,21 @@ done
 for node_name in $node_names; do
 	node_dir="$root_dir/$node_name"
 	mkdir -p "$node_dir/manifests" "$node_dir/logs"
+	case "$node_name" in
+	control-plane) network_index=0 ;;
+	worker-*) network_index=${node_name#worker-} ;;
+	esac
 	ip netns add "$node_name"
 	created_nodes="$created_nodes $node_name"
-	ip netns exec "$node_name" /tmp/node-supervisor \
+	ip netns exec "$node_name" "$supervisor_path" \
 		--node "$node_name" \
+		--runtime "$runtime_path" \
+		--kubelet "$kubelet_path" \
 		--socket "$node_dir/runtime.sock" \
 		--bundle-dir "$bundle_dir" \
+		--bridge "$bridge" \
+		--pod-cidr "$pod_network_prefix.$network_index.0/$pod_network_mask" \
+		--gateway "$pod_network_prefix.$network_index.$pod_gateway_host" \
 		--manifests "$node_dir/manifests" \
 		--api-server "${TOY_API_SERVER:-}" \
 		--log-dir "$node_dir/logs" &

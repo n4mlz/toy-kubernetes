@@ -64,7 +64,7 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 	for _, pod := range desiredPods {
 		container, ok := current[pod.Name]
 		if !ok || container.State != cri.Running {
-			if _, err := kubelet.runtime.Run(ctx, pod); err != nil {
+			if err := kubelet.runPod(ctx, pod); err != nil {
 				return err
 			}
 			if err := kubelet.updateStatus(ctx, pod, api.PodRunning); err != nil {
@@ -85,10 +85,24 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 			if err := kubelet.runtime.Stop(ctx, container.PodName); err != nil {
 				return err
 			}
+			if container.SandboxID != "" {
+				if err := kubelet.runtime.StopPodSandbox(ctx, container.SandboxID); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
 	return nil
+}
+
+func (kubelet *Kubelet) runPod(ctx context.Context, pod api.Pod) error {
+	sandbox, err := kubelet.runtime.RunPodSandbox(ctx, pod, cri.Workload)
+	if err != nil {
+		return err
+	}
+	_, err = kubelet.runtime.RunInSandbox(ctx, pod, sandbox.ID)
+	return err
 }
 
 func (kubelet *Kubelet) updateStatus(ctx context.Context, pod api.Pod, phase api.PodPhase) error {

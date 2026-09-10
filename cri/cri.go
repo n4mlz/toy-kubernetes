@@ -24,16 +24,35 @@ const (
 
 // kubelet とコンテナランタイムが扱うコンテナの状態
 type Container struct {
-	ID      string `json:"id"`
-	PodName string `json:"pod"`
-	State   State  `json:"state"`
+	ID        string `json:"id"`
+	PodName   string `json:"pod"`
+	SandboxID string `json:"sandboxID,omitempty"`
+	State     State  `json:"state"`
 }
+
+type Sandbox struct {
+	ID      string        `json:"id"`
+	PodName string        `json:"pod"`
+	Source  SandboxSource `json:"source"`
+	IP      string        `json:"ip,omitempty"`
+	State   State         `json:"state"`
+}
+
+type SandboxSource string
+
+const (
+	StaticPod SandboxSource = "staticPod"
+	Workload  SandboxSource = "workload"
+)
 
 // kubelet が Pod の実行状態を操作するための CRI の interface
 type CRI interface {
 	List(context.Context) ([]Container, error)
-	Run(context.Context, api.Pod) (Container, error)
+	ListSandboxes(context.Context) ([]Sandbox, error)
+	RunPodSandbox(context.Context, api.Pod, SandboxSource) (Sandbox, error)
+	RunInSandbox(context.Context, api.Pod, string) (Container, error)
 	Stop(context.Context, string) error
+	StopPodSandbox(context.Context, string) error
 }
 
 // Unix socket 経由でコンテナ runtime を操作する CRI client
@@ -49,18 +68,24 @@ func NewClient(socket string) *Client {
 }
 
 type request struct {
-	Operation string `json:"op"`
-	Pod       string `json:"pod,omitempty"`
-	Image     string `json:"image,omitempty"`
+	Operation string        `json:"op"`
+	Pod       string        `json:"pod,omitempty"`
+	Image     string        `json:"image,omitempty"`
+	SandboxID string        `json:"sandboxID,omitempty"`
+	Source    SandboxSource `json:"source,omitempty"`
 }
 
 type response struct {
-	OK         bool        `json:"ok"`
-	Error      string      `json:"error,omitempty"`
-	ID         string      `json:"id,omitempty"`
-	Pod        string      `json:"pod,omitempty"`
-	State      State       `json:"state,omitempty"`
-	Containers []Container `json:"containers,omitempty"`
+	OK         bool          `json:"ok"`
+	Error      string        `json:"error,omitempty"`
+	ID         string        `json:"id,omitempty"`
+	Pod        string        `json:"pod,omitempty"`
+	State      State         `json:"state,omitempty"`
+	SandboxID  string        `json:"sandboxID,omitempty"`
+	Source     SandboxSource `json:"source,omitempty"`
+	IP         string        `json:"ip,omitempty"`
+	Containers []Container   `json:"containers,omitempty"`
+	Sandboxes  []Sandbox     `json:"sandboxes,omitempty"`
 }
 
 func (client *Client) List(ctx context.Context) ([]Container, error) {
@@ -71,20 +96,36 @@ func (client *Client) List(ctx context.Context) ([]Container, error) {
 	return result.Containers, nil
 }
 
-func (client *Client) Run(ctx context.Context, pod api.Pod) (Container, error) {
+func (client *Client) ListSandboxes(ctx context.Context) ([]Sandbox, error) {
+	result, err := client.request(ctx, request{Operation: "list-sandboxes"})
+	if err != nil {
+		return nil, err
+	}
+	return result.Sandboxes, nil
+}
+
+func (client *Client) RunPodSandbox(ctx context.Context, pod api.Pod, source SandboxSource) (Sandbox, error) {
+	result, err := client.request(ctx, request{Operation: "run-pod-sandbox", Pod: pod.Name, Source: source})
+	if err != nil {
+		return Sandbox{}, err
+	}
+	return Sandbox{ID: result.SandboxID, PodName: result.Pod, Source: result.Source, IP: result.IP, State: result.State}, nil
+}
+
+func (client *Client) RunInSandbox(ctx context.Context, pod api.Pod, sandboxID string) (Container, error) {
 	if len(pod.Spec.Containers) == 0 {
 		return Container{}, errors.New("Pod has no container")
 	}
-
-	result, err := client.request(ctx, request{
-		Operation: "run",
-		Pod:       pod.Name,
-		Image:     pod.Spec.Containers[0].Image,
-	})
+	result, err := client.request(ctx, request{Operation: "run-in-sandbox", Pod: pod.Name, Image: pod.Spec.Containers[0].Image, SandboxID: sandboxID})
 	if err != nil {
 		return Container{}, err
 	}
-	return Container{ID: result.ID, PodName: result.Pod, State: result.State}, nil
+	return Container{ID: result.ID, PodName: result.Pod, SandboxID: result.SandboxID, State: result.State}, nil
+}
+
+func (client *Client) StopPodSandbox(ctx context.Context, sandboxID string) error {
+	_, err := client.request(ctx, request{Operation: "stop-pod-sandbox", SandboxID: sandboxID})
+	return err
 }
 
 func (client *Client) Stop(ctx context.Context, podName string) error {
