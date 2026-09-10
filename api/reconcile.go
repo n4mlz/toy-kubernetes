@@ -9,15 +9,15 @@ type Reconciler interface {
 
 type WatchFunc func(context.Context) (<-chan error, error)
 
-// Reconcile を一度実行した後、watch event を契機に再実行する
+// watch を確立してから Reconcile を実行し、watch event を契機に再実行する
+// 先に Reconcile すると、一覧取得と watch 開始の間に発生した変更を取り逃がす
 func Run(ctx context.Context, reconciler Reconciler, watch WatchFunc) error {
 	for {
-		if err := reconciler.Reconcile(ctx); err != nil {
-			return err
-		}
-
 		events, err := watch(ctx)
 		if err != nil {
+			return err
+		}
+		if err := reconciler.Reconcile(ctx); err != nil {
 			return err
 		}
 		select {

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-scheduler
+spec:
+  hostNetwork: true
+  containers:
+    - name: kube-scheduler
+      image: kube-scheduler

@@ -21,11 +21,11 @@ tasks:
       - task: etcd:build
       - task: apiserver:build
       - task: scheduler:build
+      - task: controller-manager:build
       - task: kubelet:build
       - task: cri:build
       - task: cni:build
       - task: kube-proxy:build
-      - task: controller-manager:build
       - task: toyctl:build
       - task: node:build
 
@@ -63,6 +63,9 @@ tasks:
     desc: Start virtual nodes and their supervisors
     cmds:
       - task: cri:runtime:build
+      - task: apiserver:build
+      - task: scheduler:build
+      - task: controller-manager:build
       - task: cri:runtime:prepare-bundle
       - task: kubelet:build
       - task: kube-proxy:build

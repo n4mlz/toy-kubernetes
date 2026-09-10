@@ -2,6 +2,7 @@ package kubelet
 
 import (
 	"context"
+	"time"
 
 	"toy-kubernetes/api"
 	"toy-kubernetes/apiserver"
@@ -71,9 +72,11 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 	for _, pod := range desiredPods {
 		container, ok := current[pod.Name]
 		if !ok || container.State != cri.Running {
-			if err := kubelet.runPod(ctx, pod); err != nil {
+			sandbox, err := kubelet.runPod(ctx, pod)
+			if err != nil {
 				return err
 			}
+			pod.Status.PodIP = sandbox.IP
 			if err := kubelet.updateStatus(ctx, pod, api.PodRunning); err != nil {
 				return err
 			}
@@ -123,15 +126,22 @@ func (kubelet *Kubelet) registerNode(ctx context.Context) error {
 		Spec:       api.NodeSpec{PodCIDR: kubelet.podCIDR},
 		Status:     api.NodeStatus{Phase: api.NodeReady},
 	}
-	if current, err := kubelet.apiClient.Nodes().Get(ctx, kubelet.nodeName); err == nil {
-		node.ResourceVersion = current.ResourceVersion
-		_, err := kubelet.apiClient.Nodes().Update(ctx, kubelet.nodeName, node)
-		return err
+	for {
+		if current, err := kubelet.apiClient.Nodes().Get(ctx, kubelet.nodeName); err == nil {
+			node.ResourceVersion = current.ResourceVersion
+			if _, err := kubelet.apiClient.Nodes().Update(ctx, kubelet.nodeName, node); err == nil {
+				return nil
+			}
+		} else if _, err := kubelet.apiClient.Nodes().Create(ctx, node); err == nil {
+			return nil
+		}
+
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	if _, err := kubelet.apiClient.Nodes().Create(ctx, node); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (kubelet *Kubelet) watch(ctx context.Context) (<-chan error, error) {
@@ -194,13 +204,15 @@ func criEventErrors(ctx context.Context, events <-chan cri.Event) <-chan error {
 	return errors
 }
 
-func (kubelet *Kubelet) runPod(ctx context.Context, pod api.Pod) error {
+func (kubelet *Kubelet) runPod(ctx context.Context, pod api.Pod) (cri.Sandbox, error) {
 	sandbox, err := kubelet.runtime.RunPodSandbox(ctx, pod, cri.Workload)
 	if err != nil {
-		return err
+		return cri.Sandbox{}, err
 	}
-	_, err = kubelet.runtime.RunInSandbox(ctx, pod, sandbox.ID)
-	return err
+	if _, err := kubelet.runtime.RunInSandbox(ctx, pod, sandbox.ID); err != nil {
+		return cri.Sandbox{}, err
+	}
+	return sandbox, nil
 }
 
 func (kubelet *Kubelet) updateStatus(ctx context.Context, pod api.Pod, phase api.PodPhase) error {

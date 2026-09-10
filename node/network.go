@@ -32,6 +32,9 @@ func ConfigureNetwork(ctx context.Context, nodeIndex, nodeCount int) error {
 	if err := runNetworkCommand(ctx, "ip", "link", "set", config.UnderlayInterface, "up"); err != nil {
 		return fmt.Errorf("enable node underlay interface: %w", err)
 	}
+	if err := runNetworkCommand(ctx, "ip", "link", "set", "lo", "up"); err != nil {
+		return fmt.Errorf("enable node loopback: %w", err)
+	}
 	if err := runNetworkCommand(ctx, "sysctl", "-q", "-w", "net.ipv4.ip_forward=1"); err != nil {
 		return fmt.Errorf("enable node forwarding: %w", err)
 	}

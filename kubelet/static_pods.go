@@ -2,6 +2,7 @@ package kubelet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"toy-kubernetes/api"
 	"toy-kubernetes/cri"
@@ -19,7 +21,7 @@ import (
 
 // manifest directory の変更を通知する。変更後の desired state は再度読み込む
 func WatchStaticPods(ctx context.Context, directory string) (<-chan struct{}, error) {
-	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC)
+	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		return nil, fmt.Errorf("watch static Pod directory: %w", err)
 	}
@@ -36,8 +38,26 @@ func WatchStaticPods(ctx context.Context, directory string) (<-chan struct{}, er
 		defer closeFD()
 		buffer := make([]byte, 4096)
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			count, err := unix.Read(fd, buffer)
 			if err != nil {
+				if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
+					timer := time.NewTimer(10 * time.Millisecond)
+					select {
+					case <-timer.C:
+					case <-ctx.Done():
+						if !timer.Stop() {
+							<-timer.C
+						}
+						return
+					}
+					continue
+				}
 				if ctx.Err() != nil {
 					return
 				}
@@ -51,10 +71,6 @@ func WatchStaticPods(ctx context.Context, directory string) (<-chan struct{}, er
 			default:
 			}
 		}
-	}()
-	go func() {
-		<-ctx.Done()
-		closeFD()
 	}()
 	return changes, nil
 }

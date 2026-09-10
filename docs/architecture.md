@@ -82,7 +82,7 @@ CNI は Pod network namespace と worker の bridge を veth pair で接続し�
 
 ### kube-proxy
 
-API server が Service 作成時に `config/const.go` の Service CIDR から ClusterIP を割り当てる。`type: NodePort` の Service には NodePort 範囲からも port を割り当てる。kube-proxy は Service と Running Pod を観測し、selector に一致する Pod を endpoint として worker namespace の nftables に反映する。Service の ClusterIP:port または NodePort への TCP を、endpoint の Pod IP:targetPort へ DNAT する。
+API server が Service 作成時に `config/const.go` の Service CIDR から ClusterIP を割り当てる。`type: NodePort` の Service には NodePort 範囲からも port を割り当てる。kube-proxy は Service と Running Pod を観測し、selector に一致する Pod を endpoint として worker namespace の nftables に反映する。Service の ClusterIP:port または NodePort への TCP を、endpoint の Pod IP:targetPort へ DNAT する。NodePort を別 Node の Pod へ転送する場合は、戻り経路のために postrouting で masquerade する。
 
 この toy 実装では kube-proxy は初回 List の後に Service と Pod を watch し、変更時に forwarding state 全体を置き換える。endpoint の増減や Service 削除時に古い rule を残さないことを優先し、本家 kube-proxy の複雑な rule 管理は対象外とする。
 

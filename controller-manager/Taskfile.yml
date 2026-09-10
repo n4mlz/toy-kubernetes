@@ -4,6 +4,8 @@ tasks:
   build:
     silent: true
     cmds:
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/kube-controller-manager ./cmd/controller-manager
       - go test -run '^$' ./controller-manager
 
   test:

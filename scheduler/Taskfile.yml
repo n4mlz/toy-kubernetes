@@ -4,6 +4,8 @@ tasks:
   build:
     silent: true
     cmds:
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/kube-scheduler ./cmd/scheduler
       - go test -run '^$' ./scheduler
 
   test:

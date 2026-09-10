@@ -11,10 +11,11 @@ import (
 
 // node supervisor が管理する常駐プロセス
 type Unit struct {
-	Name    string
-	Path    string
-	Args    []string
-	LogPath string
+	Name      string
+	Path      string
+	Args      []string
+	LogPath   string
+	ReadyPath string
 }
 
 // node 内の unit を起動し、終了時にまとめて停止する
@@ -36,6 +37,12 @@ func (supervisor *Supervisor) Run(ctx context.Context) error {
 			return err
 		}
 		supervisor.procs = append(supervisor.procs, process)
+		if unit.ReadyPath != "" {
+			if err := waitForPath(ctx, unit.ReadyPath); err != nil {
+				supervisor.Stop()
+				return err
+			}
+		}
 	}
 
 	done := make(chan error, len(supervisor.procs))
@@ -55,6 +62,26 @@ func (supervisor *Supervisor) Run(ctx context.Context) error {
 			return fmt.Errorf("supervised process exited: %w", err)
 		}
 		return nil
+	}
+}
+
+func waitForPath(ctx context.Context, path string) error {
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	interval := time.NewTicker(10 * time.Millisecond)
+	defer interval.Stop()
+
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("wait for %s", path)
+		case <-interval.C:
+		}
 	}
 }
 

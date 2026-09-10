@@ -4,6 +4,8 @@ tasks:
   build:
     silent: true
     cmds:
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/kube-apiserver ./cmd/apiserver
       - go test -run '^$' ./apiserver
 
   test:

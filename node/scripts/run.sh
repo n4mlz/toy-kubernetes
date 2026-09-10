@@ -19,6 +19,8 @@ bundle_dir=$project_root/bundles
 control_plane_manifest_dir=$project_root/node/manifests/control-plane
 underlay_bridge=toy-underlay0
 underlay_interface=underlay0
+# config/const.go の UnderlayGatewayHost と同期する
+underlay_gateway=10.200.0.1
 
 supervisor_pids=
 created_nodes=
@@ -86,6 +88,7 @@ check_resources_are_available() {
 
 create_underlay() {
 	ip link add "$underlay_bridge" type bridge
+	ip addr add "$underlay_gateway/24" dev "$underlay_bridge"
 	ip link set "$underlay_bridge" up
 }
 
@@ -116,8 +119,13 @@ start_node() {
 	node_count=$3
 	node_dir=$root_dir/$node_name
 	host_peer=toy-ul$node_index
-
+	api_server=
+	if [ "$node_index" -gt 0 ]; then
+		api_server=${TOY_API_SERVER:-http://10.200.0.2:8080}
+	fi
 	mkdir -p "$node_dir/manifests" "$node_dir/logs"
+	# .toy はこのスクリプトが管理する実行時データなので、起動ごとにログを初期化する
+	rm -f "$node_dir/logs"/*.log
 	ip netns add "$node_name"
 	created_nodes="$created_nodes $node_name"
 
@@ -126,7 +134,7 @@ start_node() {
 	ip link set "$host_peer" master "$underlay_bridge"
 	ip link set "$host_peer" up
 
-	# supervisor が node namespace 内の runtime と kubelet を起動する。
+	# supervisor が node namespace 内の runtime と kubelet を起動する
 	ip netns exec "$node_name" "$supervisor_path" \
 		--node "$node_name" \
 		--node-index "$node_index" \
@@ -137,7 +145,7 @@ start_node() {
 		--socket "$node_dir/runtime.sock" \
 		--bundle-dir "$bundle_dir" \
 		--manifests "$node_dir/manifests" \
-		--api-server "${TOY_API_SERVER:-}" \
+		--api-server "$api_server" \
 		--log-dir "$node_dir/logs" &
 	supervisor_pids="$supervisor_pids $!"
 }

@@ -67,7 +67,8 @@ func run() error {
 				"-pod-cidr", podCIDR.String(),
 				"-gateway", gateway.String(),
 			},
-			LogPath: filepath.Join(*logDir, "runtime.log"),
+			LogPath:   filepath.Join(*logDir, "runtime.log"),
+			ReadyPath: *socketPath,
 		},
 		{
 			Name:    "kubelet",

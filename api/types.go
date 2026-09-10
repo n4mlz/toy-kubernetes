@@ -83,8 +83,9 @@ func (object *Pod) SetResourceVersion(version int64) {
 }
 
 type PodSpec struct {
-	NodeName   string      `json:"nodeName,omitempty" yaml:"nodeName,omitempty"`
-	Containers []Container `json:"containers" yaml:"containers"`
+	NodeName    string      `json:"nodeName,omitempty" yaml:"nodeName,omitempty"`
+	HostNetwork bool        `json:"hostNetwork,omitempty" yaml:"hostNetwork,omitempty"`
+	Containers  []Container `json:"containers" yaml:"containers"`
 }
 
 type Container struct {
