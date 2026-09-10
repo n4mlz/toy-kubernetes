@@ -11,6 +11,13 @@ tasks:
     cmds:
       - go test ./cni
 
+  test-network:
+    silent: true
+    cmds:
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/runtime ./cmd/runtime
+      - sh ./cni/scripts/test-network.sh
+
   check:
     silent: true
     cmds:
