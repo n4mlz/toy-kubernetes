@@ -80,7 +80,9 @@ CNI は Pod network namespace と worker の bridge を veth pair で接続し�
 
 ### kube-proxy
 
-Service と endpoint を観測し、worker namespace の forwarding state を更新する。Service の ClusterIP:port から selector に一致する Pod IP:targetPort へ転送する。
+API server が Service 作成時に `config/const.go` の Service CIDR から ClusterIP を割り当てる。kube-proxy は Service と Running Pod を観測し、selector に一致する Pod を endpoint として worker namespace の nftables に反映する。Service の ClusterIP:port への TCP を、endpoint の Pod IP:targetPort へ DNAT する。
+
+この toy 実装では kube-proxy は一定間隔で List して forwarding state 全体を置き換える。endpoint の増減や Service 削除時に古い rule を残さないことを優先した単純化であり、watch と本家 kube-proxy の複雑な rule 管理は対象外とする。
 
 ## 主要な状態遷移
 
@@ -182,7 +184,7 @@ worker 間の underlay network を通じて、相手 worker の Pod CIDR への 
 
 `task node:test-network` は 2 worker を起動し、worker 間の Pod-to-Pod HTTP、片側 Pod の停止後に新しい Pod から同じ相手へ到達できること、終了時の network namespace cleanup を確認する。
 
-Service は専用の仮想 process を作らず、kube-proxy が worker namespace の forwarding rule として実現する。
+Service は専用の仮想 process を作らず、kube-proxy が worker namespace の forwarding rule として実現する。kube-proxy は API server URL が設定された worker でだけ起動し、control plane の namespace では起動しない。
 
 ## 仮想 node の作成と Kubernetes の起動
 

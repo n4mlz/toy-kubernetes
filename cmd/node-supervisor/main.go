@@ -27,6 +27,7 @@ func run() error {
 	nodeName := flags.String("node", "", "node name")
 	runtimePath := flags.String("runtime", config.RuntimeBinary, "container runtime path")
 	kubeletPath := flags.String("kubelet", config.KubeletBinary, "kubelet path")
+	kubeProxyPath := flags.String("kube-proxy", config.KubeProxyBinary, "kube-proxy path")
 	socketPath := flags.String("socket", "", "runtime socket path")
 	bundleDir := flags.String("bundle-dir", config.BundleDir, "runtime bundle directory")
 	nodeIndex := flags.Int("node-index", -1, "node network index")
@@ -37,8 +38,8 @@ func run() error {
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if *nodeName == "" || *nodeIndex < 0 || *nodeCount < 1 || *socketPath == "" || *manifestDir == "" || *logDir == "" {
-		return errors.New("node, node-index, node-count, socket, manifests and log-dir are required")
+	if *nodeName == "" || *nodeIndex < 0 || *nodeCount < 1 || *socketPath == "" || *manifestDir == "" || *logDir == "" || *kubeProxyPath == "" {
+		return errors.New("node, node-index, node-count, socket, manifests, log-dir and kube-proxy are required")
 	}
 	podCIDR, gateway, err := bootstrap.NodeNetwork(*nodeIndex)
 	if err != nil {
@@ -74,6 +75,16 @@ func run() error {
 			Args:    []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer},
 			LogPath: filepath.Join(*logDir, "kubelet.log"),
 		},
+	}
+	if *apiServer != "" && *nodeIndex > 0 {
+		// 本家の kube-proxy は kube-system の DaemonSet から各 Node に配置される。
+		// この toy 実装では DaemonSet がまだないため、node supervisor が代わりに起動する。
+		units = append(units, node.Unit{
+			Name:    "kube-proxy",
+			Path:    *kubeProxyPath,
+			Args:    []string{"-api-server", *apiServer, "-table", config.KubeProxyTable},
+			LogPath: filepath.Join(*logDir, "kube-proxy.log"),
+		})
 	}
 	supervisor := node.NewSupervisor(units)
 	return supervisor.Run(ctx)

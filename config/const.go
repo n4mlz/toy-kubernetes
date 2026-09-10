@@ -11,6 +11,8 @@ const (
 	NodePrefix         = 24
 	BridgeName         = "cni0"
 	GatewayHost        = 1
+	ServiceCIDR        = "10.96.0.0/24"
+	KubeProxyTable     = "toy_kube_proxy"
 	UnderlayBridge     = "toy-underlay0"
 	UnderlayInterface  = "underlay0"
 	UnderlayCIDR       = "10.200.0.0/24"
@@ -22,5 +24,6 @@ const (
 
 	RuntimeBinary        = BinaryDir + "/runtime"
 	KubeletBinary        = BinaryDir + "/kubelet"
+	KubeProxyBinary      = BinaryDir + "/kube-proxy"
 	NodeSupervisorBinary = BinaryDir + "/node-supervisor"
 )

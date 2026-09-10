@@ -4,12 +4,13 @@ tasks:
   build:
     silent: true
     cmds:
-      - echo '[kube-proxy] build ok (no source yet)'
+      - mkdir -p .toy/bin
+      - go build -o .toy/bin/kube-proxy ./cmd/kube-proxy
 
   test:
     silent: true
     cmds:
-      - echo '[kube-proxy] test ok (no tests yet)'
+      - go test ./kube-proxy
 
   check:
     silent: true
@@ -22,7 +23,6 @@ tasks:
     cmds:
       - "command -v go >/dev/null 2>&1 && echo '[kube-proxy] Go ok' || { echo '[kube-proxy] Go failed'; exit 1; }"
       - "command -v ip >/dev/null 2>&1 && echo '[kube-proxy] iproute2 ok' || { echo '[kube-proxy] iproute2 failed'; exit 1; }"
-
   check:forwarding:
     silent: true
     cmds:

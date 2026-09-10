@@ -120,6 +120,24 @@ func TestClientListAndWatchObserveTheSamePod(t *testing.T) {
 	}
 }
 
+func TestServerAssignsDistinctClusterIPsToServices(t *testing.T) {
+	server := newTestServer(t)
+	client := NewClient(server.URL)
+
+	first, err := client.Services().Create(context.Background(), api.Service{ObjectMeta: api.ObjectMeta{Name: "web"}, Spec: api.ServiceSpec{Port: 80, TargetPort: 80}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.Services().Create(context.Background(), api.Service{ObjectMeta: api.ObjectMeta{Name: "api"}, Spec: api.ServiceSpec{Port: 80, TargetPort: 80}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first.Spec.ClusterIP == "" || first.Spec.ClusterIP == second.Spec.ClusterIP {
+		t.Fatalf("services should receive distinct ClusterIPs: %q, %q", first.Spec.ClusterIP, second.Spec.ClusterIP)
+	}
+}
+
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 

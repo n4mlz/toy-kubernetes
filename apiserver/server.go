@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 
 	"toy-kubernetes/api"
+	"toy-kubernetes/config"
 	"toy-kubernetes/etcd"
 )
 
@@ -87,6 +89,13 @@ func (server *Server) collection(responseWriter http.ResponseWriter, request *ht
 			writeError(responseWriter, http.StatusBadRequest, err.Error())
 			return
 		}
+		if service, ok := object.(*api.Service); ok && service.Spec.ClusterIP == "" {
+			service.Spec.ClusterIP, err = server.allocateServiceIP(request.Context())
+			if err != nil {
+				writeStoreError(responseWriter, err)
+				return
+			}
+		}
 
 		version, err := server.etcd.Create(request.Context(), kind, name, object)
 		if err != nil {
@@ -99,6 +108,46 @@ func (server *Server) collection(responseWriter http.ResponseWriter, request *ht
 	default:
 		writeError(responseWriter, http.StatusMethodNotAllowed, "method is not allowed for a resource collection")
 	}
+}
+
+func (server *Server) allocateServiceIP(ctx context.Context) (string, error) {
+	prefix, err := netip.ParsePrefix(config.ServiceCIDR)
+	if err != nil {
+		return "", fmt.Errorf("parse service CIDR: %w", err)
+	}
+	if !prefix.Addr().Is4() {
+		return "", errors.New("service CIDR must be IPv4")
+	}
+	entries, _, err := server.etcd.List(ctx, "Service")
+	if err != nil {
+		return "", err
+	}
+	used := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		service := &api.Service{}
+		if err := json.Unmarshal(entry.Object, service); err != nil {
+			return "", fmt.Errorf("decode Service: %w", err)
+		}
+		used[service.Spec.ClusterIP] = true
+	}
+
+	address := prefix.Addr().As4()
+	base := uint32(address[0])<<24 | uint32(address[1])<<16 | uint32(address[2])<<8 | uint32(address[3])
+	// network address は使えないため、host 部分 2 から割り当てる。host 1 は予約する
+	const firstServiceHost = 2
+	lastHost := (uint32(1) << uint(32-prefix.Bits())) - 1
+	for host := uint32(firstServiceHost); host < lastHost; host++ {
+		candidate := serviceAddress(base, host)
+		if !used[candidate] {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("service CIDR has no available address")
+}
+
+func serviceAddress(base, host uint32) string {
+	value := base + host
+	return netip.AddrFrom4([4]byte{byte(value >> 24), byte(value >> 16), byte(value >> 8), byte(value)}).String()
 }
 
 // 名前を指定したリソースの取得・更新・削除を処理する

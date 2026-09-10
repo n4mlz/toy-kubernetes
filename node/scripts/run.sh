@@ -12,6 +12,7 @@ worker_name_prefix=worker-
 bin_dir=$project_root/.toy/bin
 runtime_path=$bin_dir/runtime
 kubelet_path=$bin_dir/kubelet
+kube_proxy_path=$bin_dir/kube-proxy
 supervisor_path=$bin_dir/node-supervisor
 root_dir=$project_root/.toy/nodes
 bundle_dir=$project_root/bundles
@@ -55,6 +56,7 @@ check_requirements() {
 	test -x "$supervisor_path" || { echo '[node] node-supervisor is not built' >&2; exit 1; }
 	test -x "$runtime_path" || { echo '[node] runtime is not built' >&2; exit 1; }
 	test -x "$kubelet_path" || { echo '[node] kubelet is not built' >&2; exit 1; }
+	test -x "$kube_proxy_path" || { echo '[node] kube-proxy is not built' >&2; exit 1; }
 }
 
 namespace_exists() {
@@ -109,6 +111,7 @@ start_node() {
 		--node-count "$node_count" \
 		--runtime "$runtime_path" \
 		--kubelet "$kubelet_path" \
+		--kube-proxy "$kube_proxy_path" \
 		--socket "$node_dir/runtime.sock" \
 		--bundle-dir "$bundle_dir" \
 		--manifests "$node_dir/manifests" \

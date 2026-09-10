@@ -6,6 +6,7 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 runtime_path=$project_root/.toy/bin/runtime
 supervisor_path=$project_root/.toy/bin/node-supervisor
 kubelet_path=$project_root/.toy/bin/kubelet
+kube_proxy_path=$project_root/.toy/bin/kube-proxy
 bundle_dir=$project_root/bundles
 run_log=$project_root/.toy/node-network-test.log
 run_pid=
@@ -17,6 +18,7 @@ check_requirements() {
 	test -x "$runtime_path" || { echo '[node] runtime is not built' >&2; exit 1; }
 	test -x "$supervisor_path" || { echo '[node] node-supervisor is not built' >&2; exit 1; }
 	test -x "$kubelet_path" || { echo '[node] kubelet is not built' >&2; exit 1; }
+	test -x "$kube_proxy_path" || { echo '[node] kube-proxy is not built' >&2; exit 1; }
 	test -f "$bundle_dir/config.json" || { echo '[node] nginx bundle is not prepared' >&2; exit 1; }
 	command -v jq >/dev/null 2>&1 || { echo '[node] jq is required' >&2; exit 1; }
 	command -v nsenter >/dev/null 2>&1 || { echo '[node] nsenter is required' >&2; exit 1; }

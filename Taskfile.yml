@@ -65,5 +65,6 @@ tasks:
       - task: cri:runtime:build
       - task: cri:runtime:prepare-bundle
       - task: kubelet:build
+      - task: kube-proxy:build
       - task: node:build
       - sh ./node/scripts/run.sh {{.CLI_ARGS}}
