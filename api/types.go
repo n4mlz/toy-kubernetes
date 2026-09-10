@@ -182,6 +182,13 @@ type Service struct {
 	Spec       ServiceSpec `json:"spec" yaml:"spec"`
 }
 
+type ServiceType string
+
+const (
+	ServiceClusterIP ServiceType = "ClusterIP"
+	ServiceNodePort  ServiceType = "NodePort"
+)
+
 func (object *Service) GetName() string {
 	return object.Name
 }
@@ -196,7 +203,9 @@ func (object *Service) SetResourceVersion(version int64) {
 
 type ServiceSpec struct {
 	Selector   map[string]string `json:"selector" yaml:"selector"`
+	Type       ServiceType       `json:"type,omitempty" yaml:"type,omitempty"`
 	ClusterIP  string            `json:"clusterIP,omitempty" yaml:"clusterIP,omitempty"`
 	Port       int               `json:"port" yaml:"port"`
 	TargetPort int               `json:"targetPort" yaml:"targetPort"`
+	NodePort   int               `json:"nodePort,omitempty" yaml:"nodePort,omitempty"`
 }

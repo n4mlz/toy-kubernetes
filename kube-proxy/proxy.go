@@ -17,6 +17,7 @@ import (
 type Rule struct {
 	ClusterIP  string
 	Port       int
+	NodePort   int
 	PodIP      string
 	TargetPort int
 }
@@ -67,6 +68,10 @@ func serviceRules(services []api.Service, pods []api.Pod) ([]Rule, error) {
 		if !clusterIP.Is4() {
 			return nil, fmt.Errorf("service %s ClusterIP must be IPv4", service.Name)
 		}
+		nodePort := 0
+		if service.Spec.Type == api.ServiceNodePort {
+			nodePort = service.Spec.NodePort
+		}
 
 		for _, pod := range pods {
 			if pod.Status.Phase != api.PodRunning || pod.Status.PodIP == "" || !api.LabelsMatch(service.Spec.Selector, pod.Labels) {
@@ -79,7 +84,7 @@ func serviceRules(services []api.Service, pods []api.Pod) ([]Rule, error) {
 			if !podIP.Is4() {
 				return nil, fmt.Errorf("Pod %s PodIP must be IPv4", pod.Name)
 			}
-			rules = append(rules, Rule{ClusterIP: service.Spec.ClusterIP, Port: service.Spec.Port, PodIP: pod.Status.PodIP, TargetPort: service.Spec.TargetPort})
+			rules = append(rules, Rule{ClusterIP: service.Spec.ClusterIP, Port: service.Spec.Port, NodePort: nodePort, PodIP: pod.Status.PodIP, TargetPort: service.Spec.TargetPort})
 		}
 	}
 
@@ -117,6 +122,9 @@ func (forwarder *NftablesForwarder) Replace(ctx context.Context, rules []Rule) e
 	}
 	for _, rule := range rules {
 		commands = append(commands, fmt.Sprintf("add rule ip %s prerouting ip daddr %s tcp dport %d dnat to %s:%d", forwarder.table, rule.ClusterIP, rule.Port, rule.PodIP, rule.TargetPort))
+		if rule.NodePort != 0 {
+			commands = append(commands, fmt.Sprintf("add rule ip %s prerouting tcp dport %d dnat to %s:%d", forwarder.table, rule.NodePort, rule.PodIP, rule.TargetPort))
+		}
 	}
 
 	command := exec.CommandContext(ctx, "nft", "-f", "-")

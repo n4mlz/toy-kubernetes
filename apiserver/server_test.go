@@ -138,6 +138,23 @@ func TestServerAssignsDistinctClusterIPsToServices(t *testing.T) {
 	}
 }
 
+func TestServerAssignsNodePortToNodePortService(t *testing.T) {
+	server := newTestServer(t)
+	client := NewClient(server.URL)
+
+	created, err := client.Services().Create(context.Background(), api.Service{
+		ObjectMeta: api.ObjectMeta{Name: "web"},
+		Spec:       api.ServiceSpec{Type: api.ServiceNodePort, Port: 80, TargetPort: 80},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if created.Spec.Type != api.ServiceNodePort || created.Spec.ClusterIP == "" || created.Spec.NodePort < 30000 || created.Spec.NodePort > 32767 {
+		t.Fatalf("NodePort Service should receive ClusterIP and NodePort: %#v", created.Spec)
+	}
+}
+
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 

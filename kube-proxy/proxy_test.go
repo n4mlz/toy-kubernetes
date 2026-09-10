@@ -37,3 +37,21 @@ func TestServiceRulesHaveNoEndpointWhenSelectorDoesNotMatch(t *testing.T) {
 		t.Fatalf("service without matching endpoints should have no rules: %#v", rules)
 	}
 }
+
+func TestServiceRulesAddNodePortForwarding(t *testing.T) {
+	services := []api.Service{{
+		Spec: api.ServiceSpec{Type: api.ServiceNodePort, Selector: map[string]string{"app": "web"}, ClusterIP: "10.96.0.2", Port: 80, TargetPort: 8080, NodePort: 30080},
+	}}
+	pods := []api.Pod{{
+		ObjectMeta: api.ObjectMeta{Labels: map[string]string{"app": "web"}},
+		Status:     api.PodStatus{Phase: api.PodRunning, PodIP: "10.244.1.2"},
+	}}
+
+	rules, err := serviceRules(services, pods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 1 || rules[0].NodePort != 30080 {
+		t.Fatalf("NodePort should be included in the forwarding rule: %#v", rules)
+	}
+}

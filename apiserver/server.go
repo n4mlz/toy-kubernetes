@@ -89,10 +89,9 @@ func (server *Server) collection(responseWriter http.ResponseWriter, request *ht
 			writeError(responseWriter, http.StatusBadRequest, err.Error())
 			return
 		}
-		if service, ok := object.(*api.Service); ok && service.Spec.ClusterIP == "" {
-			service.Spec.ClusterIP, err = server.allocateServiceIP(request.Context())
-			if err != nil {
-				writeStoreError(responseWriter, err)
+		if service, ok := object.(*api.Service); ok {
+			if err := server.prepareService(request.Context(), service, ""); err != nil {
+				writeError(responseWriter, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
@@ -145,6 +144,72 @@ func (server *Server) allocateServiceIP(ctx context.Context) (string, error) {
 	return "", errors.New("service CIDR has no available address")
 }
 
+func (server *Server) prepareService(ctx context.Context, service *api.Service, excludeName string) error {
+	if service.Spec.Type == "" {
+		service.Spec.Type = api.ServiceClusterIP
+	}
+	if service.Spec.Type != api.ServiceClusterIP && service.Spec.Type != api.ServiceNodePort {
+		return fmt.Errorf("unsupported Service type %q", service.Spec.Type)
+	}
+	if service.Spec.ClusterIP == "" {
+		clusterIP, err := server.allocateServiceIP(ctx)
+		if err != nil {
+			return err
+		}
+		service.Spec.ClusterIP = clusterIP
+	}
+	if service.Spec.Type == api.ServiceNodePort {
+		port, err := server.allocateNodePort(ctx, service.Spec.NodePort, excludeName)
+		if err != nil {
+			return err
+		}
+		service.Spec.NodePort = port
+		return nil
+	}
+	if service.Spec.NodePort != 0 {
+		return errors.New("nodePort is only valid for NodePort Service")
+	}
+	return nil
+}
+
+func (server *Server) allocateNodePort(ctx context.Context, requested int, excludeName string) (int, error) {
+	// Kubernetes の既定 NodePort 範囲
+	const (
+		firstNodePort = 30000
+		lastNodePort  = 32767
+	)
+	if requested != 0 && (requested < firstNodePort || requested > lastNodePort) {
+		return 0, fmt.Errorf("nodePort must be between %d and %d", firstNodePort, lastNodePort)
+	}
+
+	entries, _, err := server.etcd.List(ctx, "Service")
+	if err != nil {
+		return 0, err
+	}
+	used := make(map[int]bool, len(entries))
+	for _, entry := range entries {
+		service := &api.Service{}
+		if err := json.Unmarshal(entry.Object, service); err != nil {
+			return 0, fmt.Errorf("decode Service: %w", err)
+		}
+		if service.Name != excludeName && service.Spec.NodePort != 0 {
+			used[service.Spec.NodePort] = true
+		}
+	}
+	if requested != 0 {
+		if used[requested] {
+			return 0, fmt.Errorf("nodePort %d is already allocated", requested)
+		}
+		return requested, nil
+	}
+	for port := firstNodePort; port <= lastNodePort; port++ {
+		if !used[port] {
+			return port, nil
+		}
+	}
+	return 0, errors.New("NodePort range has no available port")
+}
+
 func serviceAddress(base, host uint32) string {
 	value := base + host
 	return netip.AddrFrom4([4]byte{byte(value >> 24), byte(value >> 16), byte(value >> 8), byte(value)}).String()
@@ -175,6 +240,13 @@ func (server *Server) object(responseWriter http.ResponseWriter, request *http.R
 		if bodyName != name {
 			writeError(responseWriter, http.StatusBadRequest, "metadata.name must match the URL")
 			return
+		}
+
+		if service, ok := object.(*api.Service); ok {
+			if err := server.prepareService(request.Context(), service, name); err != nil {
+				writeError(responseWriter, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 
 		resourceVersion := object.GetResourceVersion()

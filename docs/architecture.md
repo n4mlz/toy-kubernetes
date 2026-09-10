@@ -80,7 +80,7 @@ CNI は Pod network namespace と worker の bridge を veth pair で接続し�
 
 ### kube-proxy
 
-API server が Service 作成時に `config/const.go` の Service CIDR から ClusterIP を割り当てる。kube-proxy は Service と Running Pod を観測し、selector に一致する Pod を endpoint として worker namespace の nftables に反映する。Service の ClusterIP:port への TCP を、endpoint の Pod IP:targetPort へ DNAT する。
+API server が Service 作成時に `config/const.go` の Service CIDR から ClusterIP を割り当てる。`type: NodePort` の Service には NodePort 範囲からも port を割り当てる。kube-proxy は Service と Running Pod を観測し、selector に一致する Pod を endpoint として worker namespace の nftables に反映する。Service の ClusterIP:port または NodePort への TCP を、endpoint の Pod IP:targetPort へ DNAT する。
 
 この toy 実装では kube-proxy は一定間隔で List して forwarding state 全体を置き換える。endpoint の増減や Service 削除時に古い rule を残さないことを優先した単純化であり、watch と本家 kube-proxy の複雑な rule 管理は対象外とする。
 
@@ -143,8 +143,8 @@ Pod: metadata.name, metadata.labels, spec.nodeName,
 Deployment: metadata.name, spec.replicas, spec.selector, spec.template
 ReplicaSet: metadata.name, metadata.ownerReferences,
             spec.replicas, spec.selector, spec.template
-Service: metadata.name, spec.selector, spec.clusterIP,
-         spec.port, spec.targetPort
+Service: metadata.name, spec.type, spec.selector, spec.clusterIP,
+         spec.port, spec.targetPort, spec.nodePort
 ~~~
 
 ## API と watch
