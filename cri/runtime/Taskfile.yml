@@ -1,11 +1,6 @@
 version: '3'
 
 tasks:
-  prepare-bundle:
-    silent: true
-    cmds:
-      - sh ./cri/runtime/scripts/prepare-bundle.sh
-
   build:
     silent: true
     cmds:

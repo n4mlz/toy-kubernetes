@@ -75,11 +75,13 @@ func NewClient(socket string) *Client {
 }
 
 type request struct {
-	Operation string        `json:"op"`
-	Pod       string        `json:"pod,omitempty"`
-	Image     string        `json:"image,omitempty"`
-	SandboxID string        `json:"sandboxID,omitempty"`
-	Source    SandboxSource `json:"source,omitempty"`
+	Operation   string        `json:"op"`
+	Pod         string        `json:"pod,omitempty"`
+	Image       string        `json:"image,omitempty"`
+	Command     []string      `json:"command,omitempty"`
+	SandboxID   string        `json:"sandboxID,omitempty"`
+	Source      SandboxSource `json:"source,omitempty"`
+	HostNetwork bool          `json:"hostNetwork,omitempty"`
 }
 
 type response struct {
@@ -163,7 +165,7 @@ func (client *Client) ListSandboxes(ctx context.Context) ([]Sandbox, error) {
 }
 
 func (client *Client) RunPodSandbox(ctx context.Context, pod api.Pod, source SandboxSource) (Sandbox, error) {
-	result, err := client.request(ctx, request{Operation: "run-pod-sandbox", Pod: pod.Name, Source: source})
+	result, err := client.request(ctx, request{Operation: "run-pod-sandbox", Pod: pod.Name, Source: source, HostNetwork: pod.Spec.HostNetwork})
 	if err != nil {
 		return Sandbox{}, err
 	}
@@ -174,7 +176,8 @@ func (client *Client) RunInSandbox(ctx context.Context, pod api.Pod, sandboxID s
 	if len(pod.Spec.Containers) == 0 {
 		return Container{}, errors.New("Pod has no container")
 	}
-	result, err := client.request(ctx, request{Operation: "run-in-sandbox", Pod: pod.Name, Image: pod.Spec.Containers[0].Image, SandboxID: sandboxID})
+	container := pod.Spec.Containers[0]
+	result, err := client.request(ctx, request{Operation: "run-in-sandbox", Pod: pod.Name, Image: container.Image, Command: container.Command, SandboxID: sandboxID})
 	if err != nil {
 		return Container{}, err
 	}

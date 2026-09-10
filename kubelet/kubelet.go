@@ -15,12 +15,13 @@ type Kubelet struct {
 	nodeName    string
 	manifestDir string
 	podCIDR     string
+	register    bool
 }
 
 var _ api.Reconciler = (*Kubelet)(nil)
 
 func New(apiClient *apiserver.Client, runtime cri.CRI, nodeName string) *Kubelet {
-	return &Kubelet{apiClient: apiClient, runtime: runtime, nodeName: nodeName}
+	return &Kubelet{apiClient: apiClient, runtime: runtime, nodeName: nodeName, register: true}
 }
 
 func NewWithManifestDir(apiClient *apiserver.Client, runtime cri.CRI, nodeName, manifestDir string) *Kubelet {
@@ -35,14 +36,15 @@ func NewWithManifestDirAndPodCIDR(apiClient *apiserver.Client, runtime cri.CRI, 
 	return kubelet
 }
 
+func (kubelet *Kubelet) SetRegisterNode(register bool) {
+	kubelet.register = register
+}
+
 // 担当する Node の Pod を CRI で起動・停止し、Pod status を更新する
 func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 	if kubelet.manifestDir != "" {
-		pods, err := LoadStaticPods(kubelet.manifestDir)
+		pods, err := kubelet.reconcileStaticPods(ctx)
 		if err != nil {
-			return err
-		}
-		if err := ReconcileStaticPods(ctx, kubelet.runtime, pods); err != nil {
 			return err
 		}
 		if kubelet.apiClient != nil {
@@ -64,6 +66,17 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 	containers, err := kubelet.runtime.List(ctx)
 	if err != nil {
 		return err
+	}
+
+	sandboxes, err := kubelet.runtime.ListSandboxes(ctx)
+	if err != nil {
+		return err
+	}
+	staticSandboxIDs := make(map[string]struct{})
+	for _, sandbox := range sandboxes {
+		if sandbox.Source == cri.StaticPod {
+			staticSandboxIDs[sandbox.ID] = struct{}{}
+		}
 	}
 
 	desiredPods := assignedPods(pods.Items, kubelet.nodeName)
@@ -91,6 +104,9 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 	}
 
 	for _, container := range containers {
+		if _, ok := staticSandboxIDs[container.SandboxID]; ok {
+			continue
+		}
 		if _, ok := desiredPods[container.PodName]; !ok && container.State == cri.Running {
 			if err := kubelet.runtime.Stop(ctx, container.PodName); err != nil {
 				return err
@@ -106,16 +122,33 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+func (kubelet *Kubelet) reconcileStaticPods(ctx context.Context) ([]api.Pod, error) {
+	pods, err := LoadStaticPods(kubelet.manifestDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := ReconcileStaticPods(ctx, kubelet.runtime, pods); err != nil {
+		return nil, err
+	}
+	return pods, nil
+}
+
 // Pod、static manifest、CRI の変更を契機に、担当 Pod の desired state を再確認する
 func (kubelet *Kubelet) Run(ctx context.Context) error {
 	if err := kubelet.registerNode(ctx); err != nil {
 		return err
 	}
+	if kubelet.manifestDir != "" {
+		// control plane は API server 自身を static Pod として起動するため、先に local manifest だけを反映する。
+		if _, err := kubelet.reconcileStaticPods(ctx); err != nil {
+			return err
+		}
+	}
 	return api.Run(ctx, kubelet, kubelet.watch)
 }
 
 func (kubelet *Kubelet) registerNode(ctx context.Context) error {
-	if kubelet.apiClient == nil || kubelet.podCIDR == "" {
+	if !kubelet.register || kubelet.apiClient == nil || kubelet.podCIDR == "" {
 		return nil
 	}
 
@@ -149,6 +182,10 @@ func (kubelet *Kubelet) watch(ctx context.Context) (<-chan error, error) {
 		return api.CombineWatches(ctx, kubelet.watchManifests, kubelet.watchRuntime)
 	}
 
+	return api.CombineWatches(ctx, kubelet.watchPods, kubelet.watchRuntime)
+}
+
+func (kubelet *Kubelet) watchPods(ctx context.Context) (<-chan error, error) {
 	pods, err := kubelet.apiClient.Pods().List(ctx)
 	if err != nil {
 		return nil, err

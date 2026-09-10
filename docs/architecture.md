@@ -76,7 +76,9 @@ control plane 用 kubelet は API server のリソースを待たず、node の 
 
 ### CRI runtime と CNI
 
-CRI runtime は kubelet からの簡易 CRI protocol を受け、OCI bundle の `config.json` にある process.args に従って container lifecycle を実行する。`RunPodSandbox` で Pod の namespace とネットワークを用意し、`RunInSandbox` でその namespace に container process を参加させる。これは本家 CRI の `RunPodSandbox`、`CreateContainer`、`StartContainer` を、ハンズオン向けに `RunInSandbox` へまとめた形である。sandbox の待機 process は pause container 相当だが、専用 image は使用しない。CRI runtime は rootful に動作し、コンテナ process の rootfs、PID、mount、UTS、network namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri/runtime とする。
+CRI runtime は kubelet からの簡易 CRI protocol を受け、OCI bundle の `config.json` にある process.args に従って container lifecycle を実行する。Pod の `command` が指定されている場合はそれを優先する。`RunPodSandbox` で Pod の namespace とネットワークを用意し、`RunInSandbox` でその namespace に container process を参加させる。これは本家 CRI の `RunPodSandbox`、`CreateContainer`、`StartContainer` を、ハンズオン向けに `RunInSandbox` へまとめた形である。sandbox の待機 process は pause container 相当だが、専用 image は使用しない。CRI runtime は rootful に動作し、コンテナ process の rootfs、PID、mount、UTS、network namespace の作成と終了処理を担当する。リポジトリ上の実装ディレクトリは cri/runtime とする。
+
+bundle は `images/prepare-bundle.sh` が作成する。nginx、etcd、kube-apiserver、kube-scheduler、kube-controller-manager はそれぞれ `images/<component>/Dockerfile` で image を作り、その image から rootfs と `config.json` を展開する。これは CRI runtime の実装ではなく、runtime が起動する image artifact の準備である。control plane component の起動引数は static Pod manifest に置く。
 
 CNI は Pod network namespace と worker の bridge を veth pair で接続し、Pod IP と route を設定する。CRI runtime が sandbox 作成時に ADD、sandbox 停止時に DEL を呼び出す。CNI は network resource を作る imperative な effector である。
 
@@ -186,7 +188,7 @@ worker 間の underlay network を通じて、相手 worker の Pod CIDR への 
 
 `task node:test-network` は 2 worker を起動し、worker 間の Pod-to-Pod HTTP、片側 Pod の停止後に新しい Pod から同じ相手へ到達できること、終了時の network namespace cleanup を確認する。
 
-Service は専用の仮想 process を作らず、kube-proxy が worker namespace の forwarding rule として実現する。kube-proxy は API server URL が設定された worker でだけ起動し、control plane の namespace では起動しない。
+Service は専用の仮想 process を作らず、kube-proxy が worker namespace の forwarding rule として実現する。kube-proxy は API server URL が設定された worker でだけ起動し、control plane の namespace では起動しない。ClusterIP と NodePort は prerouting に加えて output にも DNAT rule を置くため、Node 自身からの接続も扱える。
 
 ## 仮想 node の作成と Kubernetes の起動
 

@@ -34,6 +34,7 @@ func run() error {
 	nodeCount := flags.Int("node-count", 0, "number of nodes in the underlay")
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
 	apiServer := flags.String("api-server", "", "API server URL")
+	registerNode := flags.Bool("register-node", true, "register this node in the API server")
 	logDir := flags.String("log-dir", "", "log directory")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
@@ -73,7 +74,7 @@ func run() error {
 		{
 			Name:    "kubelet",
 			Path:    *kubeletPath,
-			Args:    []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer, "-pod-cidr", podCIDR.String()},
+			Args:    []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer, "-pod-cidr", podCIDR.String(), fmt.Sprintf("-register-node=%t", *registerNode)},
 			LogPath: filepath.Join(*logDir, "kubelet.log"),
 		},
 	}

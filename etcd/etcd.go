@@ -179,10 +179,16 @@ func (c *EtcdClient) Watch(ctx context.Context, kind string, resourceVersion int
 			}
 
 			for _, event := range response.Events {
+				if event.Kv == nil {
+					continue
+				}
 				eventObject := event.Kv.Value
 				eventKind := Modified
 
 				if event.Type == clientv3.EventTypeDelete {
+					if event.PrevKv == nil {
+						continue
+					}
 					eventKind = Deleted
 					eventObject = event.PrevKv.Value
 				} else if event.PrevKv == nil {

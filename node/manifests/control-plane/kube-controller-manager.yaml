@@ -7,3 +7,7 @@ spec:
   containers:
     - name: kube-controller-manager
       image: kube-controller-manager
+      command:
+        - /toy/bin/kube-controller-manager
+        - -api-server
+        - http://127.0.0.1:8080

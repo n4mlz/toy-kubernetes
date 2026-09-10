@@ -7,3 +7,7 @@ spec:
   containers:
     - name: kube-scheduler
       image: kube-scheduler
+      command:
+        - /toy/bin/kube-scheduler
+        - -api-server
+        - http://127.0.0.1:8080

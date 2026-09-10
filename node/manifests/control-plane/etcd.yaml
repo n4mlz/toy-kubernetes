@@ -7,3 +7,7 @@ spec:
   containers:
     - name: etcd
       image: etcd
+      command:
+        - /toy/bin/etcd
+        - --data-dir
+        - /var/lib/etcd

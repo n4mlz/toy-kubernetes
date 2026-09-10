@@ -86,10 +86,15 @@ func apply(ctx context.Context, client *apiserver.Client, args []string) error {
 		if err != nil {
 			return fmt.Errorf("document %d: %w", document, err)
 		}
-		if err := createResource(ctx, client, object); err != nil {
+		created, err := applyResource(ctx, client, object)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("%s/%s created\n", resourceKind(object), object.GetName())
+		verb := "configured"
+		if created {
+			verb = "created"
+		}
+		fmt.Printf("%s/%s %s\n", resourceKind(object), object.GetName(), verb)
 	}
 }
 
@@ -128,25 +133,68 @@ func decodeManifest(value map[string]any) (api.Resource, error) {
 	return object, nil
 }
 
-func createResource(ctx context.Context, client *apiserver.Client, object api.Resource) error {
+func applyResource(ctx context.Context, client *apiserver.Client, object api.Resource) (bool, error) {
 	switch object := object.(type) {
 	case *api.Node:
-		_, err := client.Nodes().Create(ctx, *object)
-		return err
+		current, err := client.Nodes().Get(ctx, object.Name)
+		if err == nil {
+			object.Status = current.Status
+			object.ResourceVersion = current.ResourceVersion
+			_, err = client.Nodes().Update(ctx, object.Name, *object)
+			return false, err
+		}
+		_, err = client.Nodes().Create(ctx, *object)
+		return true, err
 	case *api.Pod:
-		_, err := client.Pods().Create(ctx, *object)
-		return err
+		current, err := client.Pods().Get(ctx, object.Name)
+		if err == nil {
+			if object.Spec.NodeName == "" {
+				object.Spec.NodeName = current.Spec.NodeName
+			}
+			object.Status = current.Status
+			object.ResourceVersion = current.ResourceVersion
+			_, err = client.Pods().Update(ctx, object.Name, *object)
+			return false, err
+		}
+		_, err = client.Pods().Create(ctx, *object)
+		return true, err
 	case *api.Deployment:
-		_, err := client.Deployments().Create(ctx, *object)
-		return err
+		current, err := client.Deployments().Get(ctx, object.Name)
+		if err == nil {
+			object.Status = current.Status
+			object.ResourceVersion = current.ResourceVersion
+			_, err = client.Deployments().Update(ctx, object.Name, *object)
+			return false, err
+		}
+		_, err = client.Deployments().Create(ctx, *object)
+		return true, err
 	case *api.ReplicaSet:
-		_, err := client.ReplicaSets().Create(ctx, *object)
-		return err
+		current, err := client.ReplicaSets().Get(ctx, object.Name)
+		if err == nil {
+			object.Status = current.Status
+			object.ResourceVersion = current.ResourceVersion
+			_, err = client.ReplicaSets().Update(ctx, object.Name, *object)
+			return false, err
+		}
+		_, err = client.ReplicaSets().Create(ctx, *object)
+		return true, err
 	case *api.Service:
-		_, err := client.Services().Create(ctx, *object)
-		return err
+		current, err := client.Services().Get(ctx, object.Name)
+		if err == nil {
+			if object.Spec.ClusterIP == "" {
+				object.Spec.ClusterIP = current.Spec.ClusterIP
+			}
+			if object.Spec.NodePort == 0 {
+				object.Spec.NodePort = current.Spec.NodePort
+			}
+			object.ResourceVersion = current.ResourceVersion
+			_, err = client.Services().Update(ctx, object.Name, *object)
+			return false, err
+		}
+		_, err = client.Services().Create(ctx, *object)
+		return true, err
 	default:
-		return fmt.Errorf("unsupported resource %T", object)
+		return false, fmt.Errorf("unsupported resource %T", object)
 	}
 }
 

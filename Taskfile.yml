@@ -12,6 +12,7 @@ includes:
   controller-manager: ./controller-manager/Taskfile.yml
   toyctl: ./cmd/toyctl/Taskfile.yml
   node: ./node/Taskfile.yml
+  images: ./images/Taskfile.yml
 
 tasks:
   build:
@@ -66,7 +67,7 @@ tasks:
       - task: apiserver:build
       - task: scheduler:build
       - task: controller-manager:build
-      - task: cri:runtime:prepare-bundle
+      - task: images:prepare-bundle
       - task: kubelet:build
       - task: kube-proxy:build
       - task: node:build

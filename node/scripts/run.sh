@@ -120,7 +120,11 @@ start_node() {
 	node_dir=$root_dir/$node_name
 	host_peer=toy-ul$node_index
 	api_server=
-	if [ "$node_index" -gt 0 ]; then
+	register_node=true
+	if [ "$node_index" -eq 0 ]; then
+		api_server=${TOY_API_SERVER:-http://127.0.0.1:8080}
+		register_node=false
+	else
 		api_server=${TOY_API_SERVER:-http://10.200.0.2:8080}
 	fi
 	mkdir -p "$node_dir/manifests" "$node_dir/logs"
@@ -146,6 +150,7 @@ start_node() {
 		--bundle-dir "$bundle_dir" \
 		--manifests "$node_dir/manifests" \
 		--api-server "$api_server" \
+		--register-node="$register_node" \
 		--log-dir "$node_dir/logs" &
 	supervisor_pids="$supervisor_pids $!"
 }

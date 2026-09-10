@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"toy-kubernetes/api"
 	"toy-kubernetes/apiserver"
@@ -57,18 +56,7 @@ func (proxy *KubeProxy) Reconcile(ctx context.Context) error {
 
 // Service または Pod の変更を契機に、forwarding state を再構成する
 func (proxy *KubeProxy) Run(ctx context.Context) error {
-	for {
-		if err := api.Run(ctx, proxy, proxy.watch); err == nil || ctx.Err() != nil {
-			return err
-		}
-
-		// API server 起動中の一時的な接続失敗では kube-proxy を終了させず、再接続する
-		select {
-		case <-time.After(100 * time.Millisecond):
-		case <-ctx.Done():
-			return nil
-		}
-	}
+	return api.Run(ctx, proxy, proxy.watch)
 }
 
 func (proxy *KubeProxy) watch(ctx context.Context) (<-chan error, error) {
@@ -164,12 +152,15 @@ func (forwarder *NftablesForwarder) Replace(ctx context.Context, rules []Rule) e
 	commands := []string{
 		"add table ip " + forwarder.table,
 		"add chain ip " + forwarder.table + " prerouting { type nat hook prerouting priority -100; policy accept; }",
+		"add chain ip " + forwarder.table + " output { type nat hook output priority -100; policy accept; }",
 		"add chain ip " + forwarder.table + " postrouting { type nat hook postrouting priority 100; policy accept; }",
 	}
 	for _, rule := range rules {
 		commands = append(commands, fmt.Sprintf("add rule ip %s prerouting ip daddr %s tcp dport %d dnat to %s:%d", forwarder.table, rule.ClusterIP, rule.Port, rule.PodIP, rule.TargetPort))
+		commands = append(commands, fmt.Sprintf("add rule ip %s output ip daddr %s tcp dport %d dnat to %s:%d", forwarder.table, rule.ClusterIP, rule.Port, rule.PodIP, rule.TargetPort))
 		if rule.NodePort != 0 {
 			commands = append(commands, fmt.Sprintf("add rule ip %s prerouting tcp dport %d dnat to %s:%d", forwarder.table, rule.NodePort, rule.PodIP, rule.TargetPort))
+			commands = append(commands, fmt.Sprintf("add rule ip %s output tcp dport %d dnat to %s:%d", forwarder.table, rule.NodePort, rule.PodIP, rule.TargetPort))
 			// 別 Node の Pod へ転送したときも、戻りパケットを NodePort の Node に戻す
 			commands = append(commands, fmt.Sprintf("add rule ip %s postrouting ip daddr %s tcp dport %d masquerade", forwarder.table, rule.PodIP, rule.TargetPort))
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -49,11 +50,13 @@ type managedContainer struct {
 }
 
 type request struct {
-	Operation string            `json:"op"`
-	Pod       string            `json:"pod,omitempty"`
-	Image     string            `json:"image,omitempty"`
-	SandboxID string            `json:"sandboxID,omitempty"`
-	Source    cri.SandboxSource `json:"source,omitempty"`
+	Operation   string            `json:"op"`
+	Pod         string            `json:"pod,omitempty"`
+	Image       string            `json:"image,omitempty"`
+	Command     []string          `json:"command,omitempty"`
+	SandboxID   string            `json:"sandboxID,omitempty"`
+	Source      cri.SandboxSource `json:"source,omitempty"`
+	HostNetwork bool              `json:"hostNetwork,omitempty"`
 }
 
 type response struct {
@@ -206,13 +209,13 @@ func (runtime *Runtime) handleRequest(input request) (response, error) {
 	case "list-sandboxes":
 		return runtime.listSandboxes(), nil
 	case "run-pod-sandbox":
-		sandbox, err := runtime.runPodSandbox(input.Pod, input.Source)
+		sandbox, err := runtime.runPodSandbox(input.Pod, input.Source, input.HostNetwork)
 		if err != nil {
 			return response{}, err
 		}
 		return response{SandboxID: sandbox.ID, Pod: sandbox.PodName, Source: sandbox.Source, State: sandbox.State, IP: sandbox.IP}, nil
 	case "run-in-sandbox":
-		container, err := runtime.runInSandbox(input.Pod, input.Image, input.SandboxID)
+		container, err := runtime.runInSandbox(input.Pod, input.Image, input.Command, input.SandboxID)
 		if err != nil {
 			return response{}, err
 		}
@@ -260,7 +263,7 @@ func (runtime *Runtime) listSandboxes() response {
 	return response{Sandboxes: sandboxes}
 }
 
-func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) (cri.Sandbox, error) {
+func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource, hostNetwork bool) (cri.Sandbox, error) {
 	runtime.mu.Lock()
 	for _, sandbox := range runtime.sandboxes {
 		if sandbox.sandbox.PodName == podName && sandbox.sandbox.Source == source && sandbox.sandbox.State == cri.Running {
@@ -276,7 +279,7 @@ func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) 
 	command := exec.Command(os.Args[0], "--sandbox-child", "--network-ready-fd", "3")
 	command.ExtraFiles = []*os.File{reader}
 	cloneFlags := uintptr(unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS)
-	if source == cri.Workload {
+	if !hostNetwork {
 		cloneFlags |= unix.CLONE_NEWNET
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: cloneFlags}
@@ -288,7 +291,7 @@ func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) 
 	netnsPath := fmt.Sprintf("/proc/%d/ns/net", command.Process.Pid)
 	result := cni.Result{}
 	if runtime.network != nil {
-		if source != cri.StaticPod {
+		if !hostNetwork {
 			result, err = runtime.network.Add(context.Background(), podName, netnsPath)
 			if err != nil {
 				_ = command.Process.Kill()
@@ -304,7 +307,7 @@ func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) 
 	}
 	_ = writer.Close()
 	id := fmt.Sprintf("sandbox-%d", command.Process.Pid)
-	sandbox := &managedSandbox{sandbox: cri.Sandbox{ID: id, PodName: podName, Source: source, IP: result.IP.String(), State: cri.Running}, process: command.Process, done: make(chan struct{}), netnsPath: netnsPath, hostNetwork: source == cri.StaticPod}
+	sandbox := &managedSandbox{sandbox: cri.Sandbox{ID: id, PodName: podName, Source: source, IP: result.IP.String(), State: cri.Running}, process: command.Process, done: make(chan struct{}), netnsPath: netnsPath, hostNetwork: hostNetwork}
 	runtime.sandboxes[id] = sandbox
 	runtime.mu.Unlock()
 	go func() { _ = command.Wait(); close(sandbox.done) }()
@@ -312,7 +315,7 @@ func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource) 
 	return sandbox.sandbox, nil
 }
 
-func (runtime *Runtime) runInSandbox(podName, image, sandboxID string) (cri.Container, error) {
+func (runtime *Runtime) runInSandbox(podName, image string, command []string, sandboxID string) (cri.Container, error) {
 	runtime.mu.Lock()
 	sandbox, ok := runtime.sandboxes[sandboxID]
 	runtime.mu.Unlock()
@@ -327,7 +330,11 @@ func (runtime *Runtime) runInSandbox(podName, image, sandboxID string) (cri.Cont
 	if err != nil {
 		return cri.Container{}, err
 	}
-	started, err := startContainerInSandbox(rootfs, config.Process.Args, sandbox.process.Pid)
+	processArgs := config.Process.Args
+	if len(command) > 0 {
+		processArgs = command
+	}
+	started, err := startContainerInSandbox(rootfs, processArgs, sandbox.process.Pid)
 	if err != nil {
 		return cri.Container{}, err
 	}
@@ -399,11 +406,6 @@ func startContainerInSandbox(rootfs string, processArgs []string, sandboxPID int
 
 func readBundleConfig(bundleDir, image string) (bundleConfig, string, error) {
 	imageDir := filepath.Join(bundleDir, image)
-	if image == "nginx" {
-		if _, err := os.Stat(filepath.Join(imageDir, "config.json")); errors.Is(err, os.ErrNotExist) {
-			imageDir = bundleDir
-		}
-	}
 	data, err := os.ReadFile(filepath.Join(imageDir, "config.json"))
 	if err != nil {
 		return bundleConfig{}, "", fmt.Errorf("read %s bundle config: %w", image, err)
@@ -417,7 +419,9 @@ func readBundleConfig(bundleDir, image string) (bundleConfig, string, error) {
 }
 
 func (runtime *Runtime) waitForContainer(podName string, command *exec.Cmd, done chan struct{}) {
-	_ = command.Wait()
+	if err := command.Wait(); err != nil {
+		log.Printf("container %s exited: %v", podName, err)
+	}
 	runtime.mu.Lock()
 	managed, ok := runtime.containers[podName]
 	hostNetwork := false
@@ -504,6 +508,10 @@ func RunContainerChild(rootfs string, processArgs []string) error {
 	commandPath, err := resolveCommand(rootfs, processArgs[0])
 	if err != nil {
 		return err
+	}
+	// container の mount を host や他の namespace へ伝播させない。
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		return fmt.Errorf("make container mounts private: %w", err)
 	}
 	if err := unix.Chroot(rootfs); err != nil {
 		return fmt.Errorf("enter container rootfs: %w", err)

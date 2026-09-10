@@ -29,6 +29,7 @@ func run() error {
 	podCIDR := flags.String("pod-cidr", "", "Pod CIDR assigned to this Node")
 	socket := flags.String("socket", "", "CRI socket path")
 	apiServer := flags.String("api-server", "", "API server URL")
+	registerNode := flags.Bool("register-node", true, "register this node in the API server")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -42,6 +43,7 @@ func run() error {
 	}
 
 	worker := kubelet.NewWithManifestDirAndPodCIDR(apiClient, cri.NewClient(*socket), *nodeName, *manifestDir, *podCIDR)
+	worker.SetRegisterNode(*registerNode)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

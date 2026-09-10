@@ -1,0 +1,7 @@
+version: '3'
+
+tasks:
+  prepare-bundle:
+    silent: true
+    cmds:
+      - sh ./images/prepare-bundle.sh
