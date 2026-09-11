@@ -2,6 +2,7 @@ version: '3'
 
 tasks:
   prepare-bundle:
+    desc: Build component images and prepare runtime bundles
     silent: true
     cmds:
       - sh ./images/prepare-bundle.sh

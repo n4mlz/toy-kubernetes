@@ -45,7 +45,6 @@ type managedContainer struct {
 	container cri.Container
 	process   *os.Process
 	done      chan struct{}
-	netnsPath string
 	sandboxID string
 }
 
@@ -422,18 +421,7 @@ func (runtime *Runtime) waitForContainer(podName string, command *exec.Cmd, done
 	if err := command.Wait(); err != nil {
 		log.Printf("container %s exited: %v", podName, err)
 	}
-	runtime.mu.Lock()
-	managed, ok := runtime.containers[podName]
-	hostNetwork := false
-	if ok {
-		if sandbox, exists := runtime.sandboxes[managed.sandboxID]; exists {
-			hostNetwork = sandbox.hostNetwork
-		}
-	}
-	runtime.mu.Unlock()
-	if ok && runtime.network != nil && !hostNetwork {
-		_ = runtime.network.Del(context.Background(), podName, managed.netnsPath)
-	}
+	// コンテナの再起動では Pod sandbox を維持するため、CNI の DEL は呼ばない
 	runtime.mu.Lock()
 	var stopped cri.Container
 	if managed, ok := runtime.containers[podName]; ok && managed.done == done {

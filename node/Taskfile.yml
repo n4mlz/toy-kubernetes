@@ -28,6 +28,11 @@ tasks:
       - task: check:tools
       - task: check:netns
 
+  clean:
+    silent: true
+    cmds:
+      - sh ./node/scripts/clean.sh
+
   check:tools:
     silent: true
     cmds:

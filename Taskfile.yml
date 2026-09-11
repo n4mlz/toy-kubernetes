@@ -60,6 +60,11 @@ tasks:
       - task: toyctl:check
       - task: node:check
 
+  clean:
+    desc: Remove virtual nodes and their network resources
+    cmds:
+      - task: node:clean
+
   run:
     desc: Start virtual nodes and their supervisors
     cmds:
@@ -72,3 +77,11 @@ tasks:
       - task: kube-proxy:build
       - task: node:build
       - sh ./node/scripts/run.sh {{.CLI_ARGS}}
+
+  e2e:
+    desc: Run the end-to-end cluster scenario
+    cmds:
+      - task: clean
+      - task: build
+      - task: images:prepare-bundle
+      - sh ./scripts/e2e.sh
