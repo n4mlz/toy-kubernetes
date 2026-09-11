@@ -38,6 +38,7 @@ tasks:
     cmds:
       - "command -v go >/dev/null 2>&1 && echo '[node] Go ok' || { echo '[node] Go failed'; exit 1; }"
       - "command -v ip >/dev/null 2>&1 && echo '[node] ip ok' || { echo '[node] ip failed'; exit 1; }"
+      - "command -v socat >/dev/null 2>&1 && echo '[node] socat ok' || { echo '[node] socat failed'; exit 1; }"
 
   check:netns:
     silent: true

@@ -24,6 +24,8 @@ underlay_gateway=10.200.0.1
 
 supervisor_pids=
 created_nodes=
+nodeport_forward_pid=
+nodeport_forward_pid_file=
 
 usage() {
 	echo "usage: $0 [--workers COUNT]" >&2
@@ -56,6 +58,7 @@ parse_args() {
 
 check_requirements() {
 	command -v ip >/dev/null 2>&1 || { echo '[node] ip failed' >&2; exit 1; }
+	command -v socat >/dev/null 2>&1 || { echo '[node] socat failed' >&2; exit 1; }
 	test -x "$supervisor_path" || { echo '[node] node-supervisor is not built' >&2; exit 1; }
 	test -x "$runtime_path" || { echo '[node] runtime is not built' >&2; exit 1; }
 	test -x "$kubelet_path" || { echo '[node] kubelet is not built' >&2; exit 1; }
@@ -156,6 +159,10 @@ start_node() {
 }
 
 cleanup() {
+	if [ -n "$nodeport_forward_pid" ]; then
+		kill -TERM "$nodeport_forward_pid" 2>/dev/null || true
+		wait "$nodeport_forward_pid" 2>/dev/null || true
+	fi
 	for pid in $supervisor_pids; do
 		kill -TERM "$pid" 2>/dev/null || true
 	done
@@ -166,6 +173,7 @@ cleanup() {
 		ip netns del "$node_name" 2>/dev/null || true
 	done
 	ip link del "$underlay_bridge" 2>/dev/null || true
+	[ -z "$nodeport_forward_pid_file" ] || rm -f "$nodeport_forward_pid_file"
 }
 
 parse_args "$@"
@@ -183,6 +191,12 @@ start_node "$control_plane_name" 0 "$node_count"
 for index in $(seq 1 "$workers"); do
 	start_node "$worker_name_prefix$index" "$index" "$node_count"
 done
+
+# worker-1 の NodePort を devcontainer の port forwarding へ渡す (便宜上)
+nodeport_forward_pid_file=$root_dir/nodeport-forward.pid
+sh "$project_root/node/scripts/forward-nodeport.sh" 30000 10.200.0.3 &
+nodeport_forward_pid=$!
+printf '%s\n' "$nodeport_forward_pid" >"$nodeport_forward_pid_file"
 
 echo "nodes ready: control-plane + $workers worker(s)"
 wait

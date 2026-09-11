@@ -15,6 +15,7 @@ RUN apt-get update \
         iputils-ping \
         jq \
         nftables \
+        socat \
         uidmap \
         util-linux \
     && rm -rf /var/lib/apt/lists/*

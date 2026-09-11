@@ -27,10 +27,10 @@ task run -- --workers 2
 ./.toy/bin/toyctl get pods/nginx-rs-1
 ```
 
-Service の NodePort は worker namespace の IP で公開されます。デフォルトでは worker-1 が `10.200.0.3`、worker-2 が `10.200.0.4` です。ブラウザで次の URL を開くと nginx にアクセスできます。
+Service の NodePort は worker namespace の IP で公開されます。デフォルトでは worker-1 が `10.200.0.3`、worker-2 が `10.200.0.4` です。さらに、worker-1 の NodePort は devcontainer の port `30000` に中継され、devcontainer の port forwarding を通して host に公開されます。ブラウザで次の URL を開くと nginx にアクセスできます。
 
 ```text
-http://10.200.0.3:30000/
+http://localhost:30000/
 ```
 
 NodePort は Service 作成時に `30000` から割り当てられます。実際の port は次で確認できます。

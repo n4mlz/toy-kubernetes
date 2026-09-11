@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: nginx
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     app: nginx
   template:
@@ -28,3 +28,4 @@ spec:
     app: nginx
   port: 80
   targetPort: 80
+  nodePort: 30000

@@ -11,6 +11,17 @@
     }
   },
   "privileged": true,
+  "forwardPorts": [30000],
+  "portsAttributes": {
+    "30000": {
+      "label": "toy-kubernetes NodePort",
+      "onAutoForward": "notify"
+    }
+  },
+  "mounts": [
+    "source=toy-kubernetes-go-mod,target=/home/vscode/go/pkg/mod,type=volume",
+    "source=toy-kubernetes-go-build,target=/root/.cache/go-build,type=volume"
+  ],
   "remoteUser": "root",
   "containerUser": "root",
   "postCreateCommand": "git config --global --add safe.directory /workspaces/toy-kubernetes",

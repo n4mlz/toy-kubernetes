@@ -190,6 +190,8 @@ worker 間の underlay network を通じて、相手 worker の Pod CIDR への 
 
 Service は専用の仮想 process を作らず、kube-proxy が worker namespace の forwarding rule として実現する。kube-proxy は API server URL が設定された worker でだけ起動し、control plane の namespace では起動しない。ClusterIP と NodePort は prerouting に加えて output にも DNAT rule を置くため、Node 自身からの接続も扱える。
 
+開発環境の外部公開では、worker-1 の NodePort を devcontainer の `30000` に中継し、devcontainer の port forwarding で host に公開する。これは Kubernetes の Service 実装ではなく、nested network namespace を devcontainer 外から確認するための環境境界である。
+
 ## 仮想 node の作成と Kubernetes の起動
 
 起動処理は、仮想 node の作成と Kubernetes 本体の起動に分ける。

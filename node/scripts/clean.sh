@@ -7,11 +7,20 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 # run.sh が作成する名前だけを対象にする
 control_plane_name=control-plane
 underlay_bridge=toy-underlay0
+nodeport_forward_pid_file="$project_root/.toy/nodes/nodeport-forward.pid"
 
 command -v ip >/dev/null 2>&1 || {
 	echo '[node] iproute2 is required' >&2
 	exit 1
 }
+
+if [ -f "$nodeport_forward_pid_file" ]; then
+	forward_pid=$(cat "$nodeport_forward_pid_file")
+	forward_args=$(ps -p "$forward_pid" -o args= 2>/dev/null || true)
+	case "$forward_args" in
+	*socat*TCP-LISTEN:30000*) kill -KILL "$forward_pid" 2>/dev/null || true ;;
+	esac
+fi
 
 # namespace を先に削除すると、namespace を参照していた process が孤児として
 # 残る環境があるため、toy-kubernetes の実行ファイルだけを先に停止する
