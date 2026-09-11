@@ -14,7 +14,6 @@ type Unit struct {
 	Name      string
 	Path      string
 	Args      []string
-	LogPath   string
 	ReadyPath string
 }
 
@@ -115,19 +114,12 @@ func (supervisor *Supervisor) waitForExit(done <-chan error, count int) {
 }
 
 func startUnit(unit Unit) (*exec.Cmd, error) {
-	logFile, err := os.OpenFile(unit.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("open %s log: %w", unit.Name, err)
-	}
-
 	process := exec.Command(unit.Path, unit.Args...)
-	process.Stdout = logFile
-	process.Stderr = logFile
+	process.Stdout = os.Stdout
+	process.Stderr = os.Stderr
 	process.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := process.Start(); err != nil {
-		logFile.Close()
 		return nil, fmt.Errorf("start %s: %w", unit.Name, err)
 	}
-	logFile.Close()
 	return process, nil
 }

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"log"
 
 	"toy-kubernetes/api"
 	"toy-kubernetes/apiserver"
@@ -46,6 +47,7 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 		if _, err := scheduler.apiClient.Pods().Update(ctx, pod.Name, pod); err != nil {
 			return err
 		}
+		log.Printf("bound Pod %s to Node %s", pod.Name, node.Name)
 		scheduler.nextNode = nextNode
 	}
 

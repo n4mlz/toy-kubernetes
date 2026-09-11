@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -20,6 +21,8 @@ func main() {
 }
 
 func run() error {
+	log.SetFlags(0)
+	log.SetPrefix("[controller-manager] ")
 	flags := flag.NewFlagSet("kube-controller-manager", flag.ContinueOnError)
 	apiServer := flags.String("api-server", "", "API server URL")
 	if err := flags.Parse(os.Args[1:]); err != nil {

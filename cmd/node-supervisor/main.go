@@ -35,20 +35,15 @@ func run() error {
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
 	apiServer := flags.String("api-server", "", "API server URL")
 	registerNode := flags.Bool("register-node", true, "register this node in the API server")
-	logDir := flags.String("log-dir", "", "log directory")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if *nodeName == "" || *nodeIndex < 0 || *nodeCount < 1 || *socketPath == "" || *manifestDir == "" || *logDir == "" || *kubeProxyPath == "" {
-		return errors.New("node, node-index, node-count, socket, manifests, log-dir and kube-proxy are required")
+	if *nodeName == "" || *nodeIndex < 0 || *nodeCount < 1 || *socketPath == "" || *kubeProxyPath == "" {
+		return errors.New("node, node-index, node-count, socket and kube-proxy are required")
 	}
 	podCIDR, gateway, err := bootstrap.NodeNetwork(*nodeIndex)
 	if err != nil {
 		return fmt.Errorf("calculate node network: %w", err)
-	}
-
-	if err := os.MkdirAll(*logDir, 0o755); err != nil {
-		return fmt.Errorf("create node log directory: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -68,24 +63,21 @@ func run() error {
 				"-pod-cidr", podCIDR.String(),
 				"-gateway", gateway.String(),
 			},
-			LogPath:   filepath.Join(*logDir, "runtime.log"),
 			ReadyPath: *socketPath,
 		},
 		{
-			Name:    "kubelet",
-			Path:    *kubeletPath,
-			Args:    []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer, "-pod-cidr", podCIDR.String(), fmt.Sprintf("-register-node=%t", *registerNode)},
-			LogPath: filepath.Join(*logDir, "kubelet.log"),
+			Name: "kubelet",
+			Path: *kubeletPath,
+			Args: []string{"-node", *nodeName, "-manifests", *manifestDir, "-socket", *socketPath, "-api-server", *apiServer, "-pod-cidr", podCIDR.String(), fmt.Sprintf("-register-node=%t", *registerNode)},
 		},
 	}
 	if *apiServer != "" && *nodeIndex > 0 {
 		// 本家の kube-proxy は kube-system の DaemonSet から各 Node に配置される。
 		// この toy 実装では DaemonSet がまだないため、node supervisor が代わりに起動する。
 		units = append(units, node.Unit{
-			Name:    "kube-proxy",
-			Path:    *kubeProxyPath,
-			Args:    []string{"-api-server", *apiServer, "-table", config.KubeProxyTable},
-			LogPath: filepath.Join(*logDir, "kube-proxy.log"),
+			Name: "kube-proxy",
+			Path: *kubeProxyPath,
+			Args: []string{"-api-server", *apiServer, "-table", config.KubeProxyTable},
 		})
 	}
 	supervisor := node.NewSupervisor(units)

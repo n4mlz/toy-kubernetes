@@ -3,9 +3,11 @@ package kubelet
 import (
 	"context"
 	"fmt"
+	"log"
 	"reflect"
 
 	"toy-kubernetes/api"
+	"toy-kubernetes/apiserver"
 )
 
 const (
@@ -37,6 +39,7 @@ func (kubelet *Kubelet) reconcileMirrorPods(ctx context.Context, staticPods []ap
 			if _, err := kubelet.apiClient.Pods().Create(ctx, mirror); err != nil {
 				return fmt.Errorf("create mirror Pod %s: %w", mirror.Name, err)
 			}
+			log.Printf("created mirror Pod %s", mirror.Name)
 			continue
 		}
 
@@ -53,9 +56,10 @@ func (kubelet *Kubelet) reconcileMirrorPods(ctx context.Context, staticPods []ap
 		if _, ok := desired[name]; ok {
 			continue
 		}
-		if err := kubelet.apiClient.Pods().Delete(ctx, pod.Name, pod.ResourceVersion); err != nil {
+		if err := kubelet.apiClient.Pods().Delete(ctx, pod.Name, pod.ResourceVersion); err != nil && !apiserver.IsNotFound(err) {
 			return fmt.Errorf("delete mirror Pod %s: %w", pod.Name, err)
 		}
+		log.Printf("deleted mirror Pod %s", pod.Name)
 	}
 	return nil
 }

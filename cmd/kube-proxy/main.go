@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +23,8 @@ func main() {
 }
 
 func run() error {
+	log.SetFlags(0)
+	log.SetPrefix("[kube-proxy] ")
 	flags := flag.NewFlagSet("kube-proxy", flag.ContinueOnError)
 	apiServer := flags.String("api-server", "", "API server URL")
 	table := flags.String("table", config.KubeProxyTable, "nftables table name")

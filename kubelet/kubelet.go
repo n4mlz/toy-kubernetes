@@ -2,6 +2,7 @@ package kubelet
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"toy-kubernetes/api"
@@ -93,6 +94,7 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 			if err := kubelet.updateStatus(ctx, pod, api.PodRunning); err != nil {
 				return err
 			}
+			log.Printf("started Pod %s on Node %s", pod.Name, kubelet.nodeName)
 			continue
 		}
 
@@ -116,6 +118,7 @@ func (kubelet *Kubelet) Reconcile(ctx context.Context) error {
 					return err
 				}
 			}
+			log.Printf("stopped Pod %s because it is no longer desired", container.PodName)
 		}
 	}
 
@@ -163,9 +166,11 @@ func (kubelet *Kubelet) registerNode(ctx context.Context) error {
 		if current, err := kubelet.apiClient.Nodes().Get(ctx, kubelet.nodeName); err == nil {
 			node.ResourceVersion = current.ResourceVersion
 			if _, err := kubelet.apiClient.Nodes().Update(ctx, kubelet.nodeName, node); err == nil {
+				log.Printf("registered Node %s", kubelet.nodeName)
 				return nil
 			}
 		} else if _, err := kubelet.apiClient.Nodes().Create(ctx, node); err == nil {
+			log.Printf("registered Node %s", kubelet.nodeName)
 			return nil
 		}
 

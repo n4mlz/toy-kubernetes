@@ -33,7 +33,7 @@ prepare_image_bundle() {
 		cp "$binary" "$context/$(basename "$binary")"
 	fi
 
-	docker build -t "$image" "$context"
+	docker build --quiet -t "$image" "$context"
 	docker_container_id=$(docker create "$image")
 	docker export "$docker_container_id" -o "$work_dir/$bundle_name.tar"
 	docker rm "$docker_container_id" >/dev/null

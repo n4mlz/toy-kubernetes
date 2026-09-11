@@ -3,8 +3,10 @@ package kubeproxy
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/netip"
 	"os/exec"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +33,7 @@ type Forwarder interface {
 type KubeProxy struct {
 	apiClient *apiserver.Client
 	forwarder Forwarder
+	lastRules []Rule
 }
 
 func New(apiClient *apiserver.Client, forwarder Forwarder) *KubeProxy {
@@ -51,7 +54,14 @@ func (proxy *KubeProxy) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return proxy.forwarder.Replace(ctx, rules)
+	if err := proxy.forwarder.Replace(ctx, rules); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(proxy.lastRules, rules) {
+		log.Printf("applied %d Service forwarding rule(s)", len(rules))
+		proxy.lastRules = rules
+	}
+	return nil
 }
 
 // Service または Pod の変更を契機に、forwarding state を再構成する

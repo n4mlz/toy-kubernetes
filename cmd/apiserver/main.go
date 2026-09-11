@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +26,8 @@ func main() {
 }
 
 func run() error {
+	log.SetFlags(0)
+	log.SetPrefix("[kube-apiserver] ")
 	flags := flag.NewFlagSet("kube-apiserver", flag.ContinueOnError)
 	listen := flags.String("listen", "0.0.0.0:8080", "HTTP listen address")
 	etcdEndpoint := flags.String("etcd-endpoint", "http://127.0.0.1:2379", "etcd client endpoint")
@@ -39,6 +42,7 @@ func run() error {
 	defer etcdClient.Close()
 
 	server := &http.Server{Addr: *listen, Handler: apiserver.NewServer(etcd.NewEtcdClient(etcdClient)).Handler()}
+	log.Printf("listening on %s", *listen)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {

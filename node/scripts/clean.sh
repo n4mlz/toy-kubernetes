@@ -59,6 +59,5 @@ ip -o link show |
 	done
 ip link del "$underlay_bridge" 2>/dev/null || true
 rm -rf "$project_root/.toy/nodes" "$project_root/bundles"
-rm -f "$project_root/.toy"/*.log
 
 echo '[node] clean ok'

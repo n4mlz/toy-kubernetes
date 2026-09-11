@@ -36,3 +36,10 @@ func TestSplitResourceAcceptsResourceAndName(t *testing.T) {
 		t.Fatalf("resource reference should be split into kind and name: %s/%s", kind, name)
 	}
 }
+
+func TestResourceKindAcceptsPodCollection(t *testing.T) {
+	kind, err := kindForResourceName("pods")
+	if err != nil || kind != "Pod" {
+		t.Fatalf("pods should identify the Pod collection: %q, %v", kind, err)
+	}
+}

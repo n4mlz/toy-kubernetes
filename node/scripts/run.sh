@@ -63,6 +63,9 @@ check_requirements() {
 	test -x "$runtime_path" || { echo '[node] runtime is not built' >&2; exit 1; }
 	test -x "$kubelet_path" || { echo '[node] kubelet is not built' >&2; exit 1; }
 	test -x "$kube_proxy_path" || { echo '[node] kube-proxy is not built' >&2; exit 1; }
+	for image in etcd kube-apiserver kube-scheduler kube-controller-manager; do
+		test -f "$bundle_dir/$image/config.json" || { echo "[node] $image bundle is not prepared" >&2; exit 1; }
+	done
 }
 
 namespace_exists() {
@@ -122,6 +125,7 @@ start_node() {
 	node_count=$3
 	node_dir=$root_dir/$node_name
 	host_peer=toy-ul$node_index
+	manifest_dir=
 	api_server=
 	register_node=true
 	if [ "$node_index" -eq 0 ]; then
@@ -130,9 +134,10 @@ start_node() {
 	else
 		api_server=${TOY_API_SERVER:-http://10.200.0.2:8080}
 	fi
-	mkdir -p "$node_dir/manifests" "$node_dir/logs"
-	# .toy はこのスクリプトが管理する実行時データなので、起動ごとにログを初期化する
-	rm -f "$node_dir/logs"/*.log
+	if [ "$node_index" -eq 0 ]; then
+		manifest_dir=$node_dir/manifests
+	fi
+	mkdir -p "$node_dir/manifests"
 	ip netns add "$node_name"
 	created_nodes="$created_nodes $node_name"
 
@@ -151,10 +156,9 @@ start_node() {
 		--kube-proxy "$kube_proxy_path" \
 		--socket "$node_dir/runtime.sock" \
 		--bundle-dir "$bundle_dir" \
-		--manifests "$node_dir/manifests" \
+		--manifests "$manifest_dir" \
 		--api-server "$api_server" \
-		--register-node="$register_node" \
-		--log-dir "$node_dir/logs" &
+		--register-node="$register_node" &
 	supervisor_pids="$supervisor_pids $!"
 }
 

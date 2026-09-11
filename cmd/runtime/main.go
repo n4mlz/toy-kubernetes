@@ -14,6 +14,8 @@ import (
 )
 
 func main() {
+	log.SetFlags(0)
+	log.SetPrefix("[runtime] ")
 	child := flag.Bool("container-child", false, "run as a container process")
 	sandboxChild := flag.Bool("sandbox-child", false, "run as a Pod sandbox process")
 	rootfs := flag.String("rootfs", "", "container rootfs")

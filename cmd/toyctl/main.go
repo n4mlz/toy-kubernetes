@@ -217,7 +217,21 @@ func resourceKind(object api.Resource) string {
 
 func get(ctx context.Context, client *apiserver.Client, args []string) error {
 	if len(args) != 1 {
-		return errors.New("get requires RESOURCE/NAME")
+		return errors.New("get requires RESOURCE or RESOURCE/NAME")
+	}
+	if !strings.Contains(args[0], "/") {
+		kind, err := kindForResourceName(args[0])
+		if err != nil {
+			return err
+		}
+		objects, err := listResources(ctx, client, kind)
+		if err != nil {
+			return err
+		}
+		for _, object := range objects {
+			fmt.Printf("%s/%s\n", kind, object.GetName())
+		}
+		return nil
 	}
 	kind, name, err := splitResource(args[0])
 	if err != nil {
@@ -229,6 +243,51 @@ func get(ctx context.Context, client *apiserver.Client, args []string) error {
 	}
 	fmt.Printf("%s/%s\n", kind, object.GetName())
 	return nil
+}
+
+func listResources(ctx context.Context, client *apiserver.Client, kind string) ([]api.Resource, error) {
+	switch kind {
+	case "Node":
+		objects, err := client.Nodes().List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return resourcePointers(objects.Items, func(object *api.Node) api.Resource { return object }), nil
+	case "Pod":
+		objects, err := client.Pods().List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return resourcePointers(objects.Items, func(object *api.Pod) api.Resource { return object }), nil
+	case "Deployment":
+		objects, err := client.Deployments().List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return resourcePointers(objects.Items, func(object *api.Deployment) api.Resource { return object }), nil
+	case "ReplicaSet":
+		objects, err := client.ReplicaSets().List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return resourcePointers(objects.Items, func(object *api.ReplicaSet) api.Resource { return object }), nil
+	case "Service":
+		objects, err := client.Services().List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return resourcePointers(objects.Items, func(object *api.Service) api.Resource { return object }), nil
+	default:
+		return nil, fmt.Errorf("unsupported kind %q", kind)
+	}
+}
+
+func resourcePointers[T any](objects []T, toResource func(*T) api.Resource) []api.Resource {
+	resources := make([]api.Resource, len(objects))
+	for index := range objects {
+		resources[index] = toResource(&objects[index])
+	}
+	return resources
 }
 
 func describe(ctx context.Context, client *apiserver.Client, args []string) error {
@@ -314,9 +373,17 @@ func splitResource(value string) (string, string, error) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", errors.New("resource must be RESOURCE/NAME")
 	}
-	kind := map[string]string{"nodes": "Node", "pods": "Pod", "deployments": "Deployment", "replicasets": "ReplicaSet", "services": "Service"}[strings.ToLower(parts[0])]
-	if kind == "" {
-		return "", "", fmt.Errorf("unsupported resource %q", parts[0])
+	kind, err := kindForResourceName(parts[0])
+	if err != nil {
+		return "", "", err
 	}
 	return kind, parts[1], nil
+}
+
+func kindForResourceName(value string) (string, error) {
+	kind := map[string]string{"nodes": "Node", "pods": "Pod", "deployments": "Deployment", "replicasets": "ReplicaSet", "services": "Service"}[strings.ToLower(value)]
+	if kind == "" {
+		return "", fmt.Errorf("unsupported resource %q", value)
+	}
+	return kind, nil
 }

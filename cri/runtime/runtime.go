@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -46,6 +47,7 @@ type managedContainer struct {
 	process   *os.Process
 	done      chan struct{}
 	sandboxID string
+	rootfs    string
 }
 
 type request struct {
@@ -306,11 +308,20 @@ func (runtime *Runtime) runPodSandbox(podName string, source cri.SandboxSource, 
 	}
 	_ = writer.Close()
 	id := fmt.Sprintf("sandbox-%d", command.Process.Pid)
-	sandbox := &managedSandbox{sandbox: cri.Sandbox{ID: id, PodName: podName, Source: source, IP: result.IP.String(), State: cri.Running}, process: command.Process, done: make(chan struct{}), netnsPath: netnsPath, hostNetwork: hostNetwork}
+	ip := ""
+	if result.IP != nil {
+		ip = result.IP.String()
+	}
+	sandbox := &managedSandbox{sandbox: cri.Sandbox{ID: id, PodName: podName, Source: source, IP: ip, State: cri.Running}, process: command.Process, done: make(chan struct{}), netnsPath: netnsPath, hostNetwork: hostNetwork}
 	runtime.sandboxes[id] = sandbox
 	runtime.mu.Unlock()
 	go func() { _ = command.Wait(); close(sandbox.done) }()
 	runtime.publish(cri.Event{Type: "sandbox-added", Sandbox: sandbox.sandbox})
+	if sandbox.sandbox.IP != "" {
+		log.Printf("started Pod sandbox %s (%s), IP %s", podName, source, sandbox.sandbox.IP)
+	} else {
+		log.Printf("started Pod sandbox %s (%s)", podName, source)
+	}
 	return sandbox.sandbox, nil
 }
 
@@ -333,17 +344,23 @@ func (runtime *Runtime) runInSandbox(podName, image string, command []string, sa
 	if len(command) > 0 {
 		processArgs = command
 	}
-	started, err := startContainerInSandbox(rootfs, processArgs, sandbox.process.Pid)
+	containerRootfs, err := copyRootfs(rootfs)
 	if err != nil {
 		return cri.Container{}, err
 	}
+	started, err := startContainerInSandbox(containerRootfs, processArgs, sandbox.process.Pid)
+	if err != nil {
+		_ = os.RemoveAll(containerRootfs)
+		return cri.Container{}, err
+	}
 	container := cri.Container{ID: fmt.Sprintf("pid-%d", started.Process.Pid), PodName: podName, SandboxID: sandboxID, State: cri.Running}
-	managed := &managedContainer{container: container, process: started.Process, done: make(chan struct{}), sandboxID: sandboxID}
+	managed := &managedContainer{container: container, process: started.Process, done: make(chan struct{}), sandboxID: sandboxID, rootfs: containerRootfs}
 	runtime.mu.Lock()
 	runtime.containers[podName] = managed
 	runtime.mu.Unlock()
 	go runtime.waitForContainer(podName, started, managed.done)
 	runtime.publish(cri.Event{Type: "container-added", Container: container})
+	log.Printf("started container for Pod %s", podName)
 	return container, nil
 }
 
@@ -367,6 +384,7 @@ func (runtime *Runtime) stopPodSandbox(id string) error {
 	delete(runtime.sandboxes, id)
 	runtime.mu.Unlock()
 	runtime.publish(cri.Event{Type: "sandbox-removed", Sandbox: sandbox.sandbox})
+	log.Printf("stopped Pod sandbox %s", sandbox.sandbox.PodName)
 	return nil
 }
 
@@ -387,7 +405,8 @@ func startContainerInSandbox(rootfs string, processArgs []string, sandboxPID int
 	args := append([]string{"--container-child", "--rootfs", rootfs, "--network-fd", "3", "--network-ready-fd", "4", "--"}, processArgs...)
 	command := exec.Command(executable, args...)
 	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS}
-	command.Stdout, command.Stderr = os.Stdout, os.Stderr
+	// tutorial の標準出力は cluster の状態遷移に使うため、container の生ログは流さない。
+	command.Stdout, command.Stderr = io.Discard, io.Discard
 	command.ExtraFiles = []*os.File{network, reader}
 	if err := command.Start(); err != nil {
 		_ = reader.Close()
@@ -427,13 +446,28 @@ func (runtime *Runtime) waitForContainer(podName string, command *exec.Cmd, done
 	if managed, ok := runtime.containers[podName]; ok && managed.done == done {
 		managed.container.State = cri.Stopped
 		managed.process = nil
+		_ = os.RemoveAll(managed.rootfs)
 		stopped = managed.container
 	}
 	runtime.mu.Unlock()
 	if stopped.ID != "" {
 		runtime.publish(cri.Event{Type: "container-stopped", Container: stopped})
+		log.Printf("container for Pod %s stopped", podName)
 	}
 	close(done)
+}
+
+// image bundle は複数 Pod から共有するため、container ごとに書き込み用 rootfs を作る。
+func copyRootfs(source string) (string, error) {
+	target, err := os.MkdirTemp("", "toy-kubernetes-rootfs-")
+	if err != nil {
+		return "", fmt.Errorf("create container rootfs: %w", err)
+	}
+	if output, err := exec.Command("cp", "-a", source+"/.", target).CombinedOutput(); err != nil {
+		_ = os.RemoveAll(target)
+		return "", fmt.Errorf("copy container rootfs: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return target, nil
 }
 
 func (runtime *Runtime) stop(podName string) error {

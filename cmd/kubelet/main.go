@@ -23,6 +23,8 @@ func main() {
 }
 
 func run() error {
+	log.SetFlags(0)
+	log.SetPrefix("[kubelet] ")
 	flags := flag.NewFlagSet("kubelet", flag.ContinueOnError)
 	nodeName := flags.String("node", "", "node name")
 	manifestDir := flags.String("manifests", "", "static Pod manifest directory")
@@ -33,8 +35,8 @@ func run() error {
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if *nodeName == "" || *manifestDir == "" || *socket == "" {
-		return errors.New("node, manifests and socket are required")
+	if *nodeName == "" || *socket == "" {
+		return errors.New("node and socket are required")
 	}
 
 	var apiClient *apiserver.Client

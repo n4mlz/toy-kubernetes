@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -152,11 +153,13 @@ func ReconcileStaticPods(ctx context.Context, runtime cri.CRI, pods []api.Pod) e
 				return fmt.Errorf("start static Pod sandbox %s: %w", pod.Name, err)
 			}
 			sandboxes = append(sandboxes, sandbox)
+			log.Printf("started static Pod sandbox %s", pod.Name)
 		}
 		if container, ok := containerForSandbox(containers, sandbox.ID); !ok || container.State != cri.Running {
 			if _, err := runtime.RunInSandbox(ctx, pod, sandbox.ID); err != nil {
 				return fmt.Errorf("start static Pod %s: %w", pod.Name, err)
 			}
+			log.Printf("started static Pod %s", pod.Name)
 		}
 	}
 
@@ -170,6 +173,7 @@ func ReconcileStaticPods(ctx context.Context, runtime cri.CRI, pods []api.Pod) e
 		if err := runtime.StopPodSandbox(ctx, sandbox.ID); err != nil {
 			return fmt.Errorf("stop removed static Pod %s: %w", sandbox.PodName, err)
 		}
+		log.Printf("stopped removed static Pod %s", sandbox.PodName)
 	}
 	return nil
 }

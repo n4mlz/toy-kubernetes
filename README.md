@@ -23,8 +23,8 @@ task run -- --workers 2
 別の terminal で manifest を apply します。
 
 ```sh
-./.toy/bin/toyctl apply -f manifests/nginx.yaml
-./.toy/bin/toyctl get pods/nginx-rs-1
+toyctl apply -f manifests/nginx.yaml
+toyctl get pods/nginx-rs-1
 ```
 
 Service の NodePort は worker namespace の IP で公開されます。デフォルトでは worker-1 が `10.200.0.3`、worker-2 が `10.200.0.4` です。さらに、worker-1 の NodePort は devcontainer の port `30000` に中継され、devcontainer の port forwarding を通して host に公開されます。ブラウザで次の URL を開くと nginx にアクセスできます。

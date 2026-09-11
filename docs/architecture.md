@@ -200,7 +200,7 @@ Service は専用の仮想 process を作らず、kube-proxy が worker namespac
 
 1. control plane と指定された数の worker 用 network namespace を作る
 2. underlay network、worker bridge、worker 間 route を作る
-3. 各 node の設定、static Pod manifest directory、CRI socket、ログ directory を用意する
+3. 各 node の設定、static Pod manifest directory、CRI socket を用意する
 4. 各 node namespace の init process として、小さい systemd 相当の node supervisor を起動する
 
 node supervisor は、node namespace 内で常駐 process の起動、終了監視、終了時の cleanup を担当する。これは systemd の全機能を再現するものではなく、unit の依存関係、restart、signal forwarding に必要な最小機能だけを持つ。
@@ -224,7 +224,7 @@ task run
                  └─ kubelet
 ~~~
 
-`node/scripts/run.sh` は namespace、node directory、supervisor の起動と、終了時の namespace cleanup を担当する。`cmd/node-supervisor/main.go` は supervisor executable の入口として、node 内で起動する unit を組み立てる。`node/supervisor.go` は unit の process group、ログ、終了監視、signal forwarding を管理する。CRI runtime と kubelet は同じ supervisor が管理する。
+`node/scripts/run.sh` は namespace、node directory、supervisor の起動と、終了時の namespace cleanup を担当する。`cmd/node-supervisor/main.go` は supervisor executable の入口として、node 内で起動する unit を組み立てる。`node/supervisor.go` は unit の process group、終了監視、signal forwarding を管理する。unit の標準出力と標準エラーは親 process を通じて表示する。CRI runtime と kubelet は同じ supervisor が管理する。
 
 control plane の static Pod manifest は `config/const.go` の `ControlPlaneManifestDir` に対応する `node/manifests/control-plane` から control-plane node の manifest directory へ run script が配置する。manifest がない場合、run script は起動を続けない。
 

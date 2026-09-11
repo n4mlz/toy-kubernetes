@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,23 @@ import (
 
 	"toy-kubernetes/api"
 )
+
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (err *HTTPError) Error() string {
+	if err.Message == "" {
+		return fmt.Sprintf("API request failed with status %d", err.StatusCode)
+	}
+	return fmt.Sprintf("API request failed with status %d: %s", err.StatusCode, err.Message)
+}
+
+func IsNotFound(err error) bool {
+	var httpError *HTTPError
+	return errors.As(err, &httpError) && httpError.StatusCode == http.StatusNotFound
+}
 
 // API server の HTTP API を呼び出すクライアント
 // controller や kubelet など、API server とは別に動く component に組み込んで使う
@@ -197,9 +215,9 @@ func (client *Client) request(ctx context.Context, method, path string, input, o
 			Message string `json:"error"`
 		}
 		if err := json.NewDecoder(response.Body).Decode(&responseError); err != nil {
-			return fmt.Errorf("API request failed with status %d", response.StatusCode)
+			return &HTTPError{StatusCode: response.StatusCode}
 		}
-		return fmt.Errorf("API request failed with status %d: %s", response.StatusCode, responseError.Message)
+		return &HTTPError{StatusCode: response.StatusCode, Message: responseError.Message}
 	}
 
 	if output == nil || response.StatusCode == http.StatusNoContent {

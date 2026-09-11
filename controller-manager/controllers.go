@@ -3,6 +3,7 @@ package controllermanager
 import (
 	"context"
 	"fmt"
+	"log"
 	"reflect"
 	"sort"
 
@@ -55,6 +56,7 @@ func (controller *DeploymentController) Reconcile(ctx context.Context) error {
 			if _, err := controller.apiClient.ReplicaSets().Create(ctx, newReplicaSet(deployment)); err != nil {
 				return err
 			}
+			log.Printf("created ReplicaSet for Deployment %s", deployment.Name)
 			continue
 		}
 
@@ -68,6 +70,7 @@ func (controller *DeploymentController) Reconcile(ctx context.Context) error {
 		if _, err := controller.apiClient.ReplicaSets().Update(ctx, replicaSet.Name, desired); err != nil {
 			return err
 		}
+		log.Printf("updated ReplicaSet %s from Deployment %s", replicaSet.Name, deployment.Name)
 	}
 
 	return nil
@@ -191,6 +194,7 @@ func (controller *ReplicaSetController) reconcilePods(ctx context.Context, repli
 		if _, err := controller.apiClient.Pods().Create(ctx, newPod(replicaSet, name)); err != nil {
 			return err
 		}
+		log.Printf("created Pod %s for ReplicaSet %s", name, replicaSet.Name)
 	}
 
 	for index := desiredReplicas; index < len(managedPods); index++ {
@@ -199,6 +203,7 @@ func (controller *ReplicaSetController) reconcilePods(ctx context.Context, repli
 		if err := controller.apiClient.Pods().Delete(ctx, pod.Name, pod.ResourceVersion); err != nil {
 			return err
 		}
+		log.Printf("deleted excess Pod %s from ReplicaSet %s", pod.Name, replicaSet.Name)
 	}
 
 	if replicaSet.Status.Replicas == desiredReplicas {

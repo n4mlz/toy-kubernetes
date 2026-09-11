@@ -16,26 +16,42 @@ type WatchFunc func(context.Context) (<-chan error, error)
 // watch を確立してから Reconcile を実行し、watch event を契機に再実行する
 // 先に Reconcile すると、一覧取得と watch 開始の間に発生した変更を取り逃がす
 func Run(ctx context.Context, reconciler Reconciler, watch WatchFunc) error {
+	watchFailed := false
+	reconcileFailed := false
 	for {
 		events, err := watch(ctx)
 		if err != nil {
-			if !retry(ctx, "open watch", err) {
+			if !watchFailed {
+				log.Printf("open watch: %v; retrying", err)
+				watchFailed = true
+			}
+			if !waitForRetry(ctx) {
 				return ctx.Err()
 			}
 			continue
 		}
+		if watchFailed {
+			log.Print("watch reconnected")
+			watchFailed = false
+		}
 		if err := reconciler.Reconcile(ctx); err != nil {
-			if !retry(ctx, "reconcile", err) {
+			if !reconcileFailed {
+				log.Printf("reconcile: %v; retrying", err)
+				reconcileFailed = true
+			}
+			if !waitForRetry(ctx) {
 				return ctx.Err()
 			}
 			continue
+		}
+		if reconcileFailed {
+			log.Print("reconcile recovered")
+			reconcileFailed = false
 		}
 		select {
 		case err, ok := <-events:
 			if ok && err != nil {
-				if !retry(ctx, "watch", err) {
-					return ctx.Err()
-				}
+				log.Printf("watch event: %v; reconnecting", err)
 			}
 		case <-ctx.Done():
 			return nil
@@ -43,10 +59,11 @@ func Run(ctx context.Context, reconciler Reconciler, watch WatchFunc) error {
 	}
 }
 
-func retry(ctx context.Context, operation string, err error) bool {
-	log.Printf("%s: %v; retrying", operation, err)
+func waitForRetry(ctx context.Context) bool {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
 	select {
-	case <-time.After(100 * time.Millisecond):
+	case <-timer.C:
 		return true
 	case <-ctx.Done():
 		return false
